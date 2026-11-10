@@ -1,0 +1,298 @@
+// EXPANSION — comprehensive enhancement layer (2026-10-28 directive).
+// Additive only: the verified V2 bank, the Ammo bank, and every master
+// stay word-for-word untouched. This module adds:
+//  1. NEW LANES — emergent / regional pockets plus the strongest Ammo
+//     styles promoted to full lanes. Genre substance is drawn from the
+//     two hip-hop production reference documents in the beat goal's
+//     sources (pasted 2026-10-27, unverified quarry material); anything
+//     not in those sources is plain generic production description.
+//     No artist or producer names anywhere. No Suno facts are claimed.
+//  2. STRUCTURAL FRAMEWORKS — a named profile per lane (old and new):
+//     its signature layout, where its builds / drops / breakdowns sit,
+//     and its signature events. The lyrics-map generator, the Simple
+//     composer, and the remix templates all read from these profiles,
+//     so structures differ by genre instead of sharing one skeleton.
+//  3. ANALYZER AFFINITY — per-lane tempo / brightness / density /
+//     low-end affinities so Analyze can rank lane suggestions across
+//     the whole library, old and new lanes alike.
+
+import { LANES, LOCK_LINE, type JobType } from "./bank";
+
+export { LOCK_LINE };
+
+export interface FrameworkProfile {
+  /** Named framework, e.g. "Low-End Bounce Frame". */
+  name: string;
+  /** Signature bar layout in one line. */
+  layout: string;
+  /** Where / how the build-ups sit (short clause, map-ready). */
+  build: string;
+  /** Where / how the drops land (short clause, map-ready). */
+  drop: string;
+  /** Where / how the breakdown sits (short clause, map-ready). */
+  breakdown: string;
+  /** Signature events, comma list. */
+  signature: string;
+}
+
+export interface ExpansionLane {
+  name: string;
+  region: string;
+  /** Where the genre substance came from, honestly labeled. */
+  sourceNote: string;
+  drums: string;
+  short: string;
+  texture: string;
+  bpm: [number, number];
+  bright: "dark" | "mid" | "bright" | "any";
+  density: "sparse" | "steady" | "busy" | "any";
+}
+
+const SRC_REF = "Production reference docs (beat goal sources, pasted 2026-10-27)";
+const SRC_AMMO = "Promoted from the Ammo bank's strongest styles";
+const SRC_GEN = "Generic production description (regional pocket, builder-authored)";
+
+export const EXPANSION_LANES: ExpansionLane[] = [
+  { name: "Milwaukee low-end", region: "Milwaukee / Midwest", sourceNote: SRC_GEN, drums: "low-end bounce pocket, clap-heavy backbeat, short punchy 808 stabs, sparse hats, piano-led bounce", short: "clap-heavy bounce, short 808 stabs, sparse hats", texture: "bright piano riff and handclaps", bpm: [92, 112], bright: "bright", density: "steady" },
+  { name: "DMV crank", region: "DMV", sourceNote: SRC_GEN, drums: "crank pocket with go-go style conga bounce, heavy kick, sharp snare, short 808 hits, call-response percussion", short: "conga bounce, heavy kick, sharp snare, short 808", texture: "percussion-led bounce, chant space", bpm: [95, 118], bright: "mid", density: "busy" },
+  { name: "Jerk", region: "West Coast new wave", sourceNote: SRC_GEN, drums: "jerk bounce, pin-drop kick pattern, snap and clap accents, short 808, playful dance-pocket swing", short: "pin-drop kicks, snap accents, short 808, swing", texture: "playful synth stabs and snap accents", bpm: [88, 108], bright: "bright", density: "steady" },
+  { name: "NY sample drill", region: "New York", sourceNote: SRC_REF, drums: "sample-led drill pocket, sliding 808 glides under the chop, punchy syncopated snare, tight hats", short: "sliding 808 glides, syncopated snare, tight hats", texture: "chopped melodic sample as the lead", bpm: [135, 150], bright: "mid", density: "steady" },
+  { name: "Afro-trap", region: "West Africa / global", sourceNote: SRC_REF, drums: "shaker and djembe polyrhythm over trap hats, melodic 808 support, log-drum touches, rolling pocket", short: "shaker polyrhythm, trap hats, melodic 808", texture: "West African percussion and melodic motifs", bpm: [100, 122], bright: "bright", density: "busy" },
+  { name: "Hood trap", region: "Southern / street trap", sourceNote: SRC_GEN, drums: "raw trap pocket, half-time snare on 3, heavy long 808, crisp clap, sparse arrangement, space and tension", short: "half-time snare on 3, heavy long 808, crisp clap", texture: "hard minor-key piano, sparse and raw", bpm: [130, 150], bright: "dark", density: "sparse" },
+  { name: "Detroit scam-rap pocket", region: "Detroit", sourceNote: SRC_REF, drums: "frantic off-beat hats and crisp claps pushed ahead of the beat, sparse bending 808, urgent rushed pocket", short: "off-beat hats, crisp claps ahead, bending 808", texture: "dark haunting minor-key piano loop", bpm: [150, 175], bright: "dark", density: "busy" },
+  { name: "Florida fast", region: "Florida", sourceNote: SRC_GEN, drums: "fast pocket, rapid hat runs, hard kick bursts, short 808 stabs, bright synth stabs, high-energy bounce", short: "rapid hats, kick bursts, short 808 stabs", texture: "bright stabs and fast momentum", bpm: [145, 170], bright: "bright", density: "busy" },
+  { name: "Texas slab", region: "Texas", sourceNote: SRC_GEN, drums: "slab pocket, slow heavy sub weight, laid-back snare behind the beat, sparse hats, trunk low end", short: "slow heavy sub, laid-back snare, sparse hats", texture: "chopped soul texture, syrupy feel", bpm: [68, 88], bright: "dark", density: "sparse" },
+  { name: "Chopped & screwed", region: "Houston / Texas", sourceNote: SRC_REF, drums: "slowed dragged pocket, stutter-chop edits, heavy echo tails, deep slowed 808, syrupy swing", short: "slowed pocket, stutter chops, deep slowed 808", texture: "slowed synths and chopped segments", bpm: [60, 78], bright: "dark", density: "sparse" },
+  { name: "Drift phonk", region: "Phonk / drift", sourceNote: SRC_REF, drums: "cowbell melody as lead percussion, distorted saturated 808, triplet hats, tape hiss, sliding pocket", short: "cowbell lead, saturated 808, triplet hats", texture: "chopped jazz and soul loops, lo-fi mix", bpm: [120, 145], bright: "dark", density: "steady" },
+  { name: "Dark trap", region: "Trap core", sourceNote: SRC_AMMO, drums: "sparse dark trap pocket, heavy distorted 808, slow hat rolls, tension space between hits", short: "sparse pocket, distorted 808, slow hat rolls", texture: "minor-key synth and piano tension", bpm: [125, 145], bright: "dark", density: "sparse" },
+  { name: "Boom trap", region: "Hybrid", sourceNote: SRC_REF, drums: "swung break chops with modern rolling 808 and un-swung trap hat subdivisions, snare on 2 and 4", short: "swung break chops, rolling 808, trap hats", texture: "vinyl chops over a modern low end", bpm: [85, 105], bright: "mid", density: "steady" },
+  { name: "Afro-drill", region: "UK / Afrobeats cross", sourceNote: SRC_REF, drums: "sliding 808 glides with log-drum percussion, Afrobeats syncopation, tight drill hats, dark pocket", short: "808 glides, log-drum percussion, drill hats", texture: "dark melodic loop with log-drum bounce", bpm: [135, 148], bright: "mid", density: "busy" },
+  { name: "Latin trap", region: "Latin / Caribbean cross", sourceNote: SRC_REF, drums: "dembow tresillo 3-3-2 syncopation under trap hats, heavy 808, rolling pocket with a dance pull", short: "dembow tresillo, trap hats, heavy 808", texture: "bright tropical melodic loops", bpm: [86, 100], bright: "bright", density: "steady" },
+  { name: "Amapiano hip-hop", region: "South Africa / global", sourceNote: SRC_REF, drums: "log-drum bass as sub and rhythm anchor, shaker pocket, hip-hop kick and snare layer, rolling groove", short: "log-drum anchor, shaker pocket, hip-hop kit", texture: "jazzy piano loops and vocal-chop space", bpm: [108, 118], bright: "mid", density: "steady" },
+  { name: "Grime", region: "UK", sourceNote: SRC_REF, drums: "syncopated garage-style drums at a fast clip, sparse square sub stabs, empty midrange, sharp hats", short: "syncopated drums, square sub stabs, sharp hats", texture: "dark minimal synth stabs", bpm: [136, 144], bright: "mid", density: "busy" },
+  { name: "New Orleans bounce", region: "New Orleans", sourceNote: SRC_REF, drums: "fast signature breakbeat, relentless shaker and snare, call-response percussion, repetitive bounce pocket", short: "fast breakbeat, shaker and snare, bounce pocket", texture: "call-and-response sample loops", bpm: [95, 112], bright: "bright", density: "busy" },
+  { name: "Digicore / glitch trap", region: "Internet / experimental", sourceNote: SRC_REF, drums: "glitched trap drums, micro-edited kicks, pitch-shifted chops, bitcrushed texture, maximalist edits", short: "glitched drums, micro-edits, bitcrushed chops", texture: "chiptune-style synth sparkle", bpm: [140, 165], bright: "bright", density: "busy" },
+  { name: "Tread", region: "Experimental / fast", sourceNote: SRC_REF, drums: "ultra-fast relentless pocket, chopped break runs, lo-fi kick and snare velocity, minimal aggressive design", short: "ultra-fast breaks, lo-fi kick runs, hard cuts", texture: "icy futuristic synth palette", bpm: [175, 195], bright: "mid", density: "busy" },
+];
+
+export const EXPANSION_LANE_NAMES: string[] = EXPANSION_LANES.map((l) => l.name);
+
+/** Every lane in the app: the 21 verified-bank lanes first, then the expansion. */
+export const ALL_LANES: string[] = [...LANES, ...EXPANSION_LANE_NAMES];
+
+export function isExpansionLane(lane: string): boolean {
+  return EXPANSION_LANE_NAMES.includes(lane);
+}
+
+export function expansionLane(lane: string): ExpansionLane | undefined {
+  return EXPANSION_LANES.find((l) => l.name === lane);
+}
+
+// ---------------------------------------------------------------------------
+// STRUCTURAL FRAMEWORKS — one named profile per lane, old and new.
+// ---------------------------------------------------------------------------
+
+function fw(
+  name: string,
+  layout: string,
+  build: string,
+  drop: string,
+  breakdown: string,
+  signature: string,
+): FrameworkProfile {
+  return { name, layout, build, drop, breakdown, signature };
+}
+
+export const FRAMEWORKS: Record<string, FrameworkProfile> = {
+  // --- The original 21 lanes, each with its own frame ---
+  Trap: fw("Half-Time Hammer Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, half-time weight", "riser and snare roll 8ths to 32nds climb into the hook", "heavy drop on chorus bar 1, 808 and kick carry it", "melody and tops only before the final build", "hat rolls at phrase ends, stop-time cuts, half-time final chorus"),
+  "Chiraq drill": fw("Slide Pressure Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, tight and direct", "short riser, hats tighten, 808 pulls back", "drop lands as a sliding 808 entry, no EDM lift", "drums thin to hats and 808 slides only", "off-beat 808 slides, direct snare cracks, no swing"),
+  "UK drill": fw("Glide Syncopation Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, syncopated glide", "reverse swell and shuffled hat build", "chorus drop rides a long 808 glide", "piano and tops only, glide tail exposed", "808 glides, shuffled hats, dark piano space"),
+  "NY drill": fw("Punch Pocket Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, aggressive pocket", "fast riser, snare roll snaps into the hook", "punchy drop on bar 1, short 808 hits", "sample-style melody alone, drums out", "short sliding hits, crisp hats, forward snare"),
+  "Boom bap": fw("Break & Chop Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, break-led", "build is a drum fill and a dropped beat — no riser", "chorus lands by the full break returning, not a drop", "break alone — chop and bass stripped bare", "swung fills, chop flips at section turns, snare on 2 and 4"),
+  "Boom bap revival / conscious": fw("Head-Nod Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, warm and steady", "gentle fill build, live-feel snare roll", "chorus lifts by layers joining, weight stays round", "warm sub and melody only, space to breathe", "live-feel fills, soft rolls, head-nod swing"),
+  "Detroit trap": fw("Rush Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, drums ahead of the beat", "frantic hat acceleration, claps rush the build", "drop hits early and urgent, bending 808 under it", "piano loop alone, hats ghost underneath", "off-kilter hat bursts, dry snare, rushed fills"),
+  "West Coast / G-funk": fw("Laid-Back Funk Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, behind the beat", "smooth swell, talkbox-style glide rises", "chorus settles into the pocket rather than dropping", "funk bass and tops only, groove exposed", "glide tails, round sub, relaxed fills"),
+  "Memphis phonk / dark trap": fw("Cassette Dread Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, lo-fi and dark", "tape-worn riser, cowbell pattern thickens", "drop is a distorted 808 slam under the cowbell", "cowbell and loop only, cassette hiss up front", "cowbell accents, triplet hats, tape-stop tails"),
+  "Gospel trap": fw("Lift & Testify Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, lifts at the hook", "organ swell and choir space rise into the hook", "chorus drop lifts — choir and 808 land together", "organ and choir only, drums fully out", "choir lifts, organ swells, half-time snare on 3"),
+  "Cloud rap / dreamo": fw("Float Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, washed and wide", "slow pad swell, no hard build", "chorus blooms instead of dropping — width opens", "pads and tops only, drums dissolve out", "airy hat flickers, soft impacts, long reverb tails"),
+  "Trap soul": fw("Late-Night Slide Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, smooth R&B pocket", "soft riser and a melodic 808 climb", "chorus drop is a smooth slide-in, weight stays silky", "chords and tops only, vocal-style lead space", "melodic 808 slides, soft rolls, sidechain breathing"),
+  "Jersey club rap": fw("Five-Kick Bounce Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, club bounce", "chopped vocal ticks and kick pattern build", "drop is the full five-kick pattern landing", "kick pattern alone, squeak percussion exposed", "five-kick bounce, chopped breaks, fast cuts"),
+  Plugg: fw("Sparkle Minimal Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, light and minimal", "tiny pluck build, hats stay tight", "chorus pops with a bouncy short 808, no heavy drop", "plucks and tops only, game-sparkle space", "short 808 bounces, sparkle fills, minimal stacks"),
+  Pluggnb: fw("Dream Pocket Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, dreamy R&B pocket", "soft pluck and pad build", "chorus glides in on a melodic 808 line", "chords and plucks only, drums out", "808 glides, soft snare, dreamy fills"),
+  Rage: fw("Supersaw Slam Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, maximalist", "detuned riser and clipped roll climb hard", "heaviest drop leads — clipped 808 and full-width lead", "lead strips to a single detuned tail", "hard-clipped hits, aggressive rolls, compressed slams"),
+  Horrorcore: fw("Dread Space Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, menacing space", "detuned swell creeps in, no bright build", "drop is a heavy 808 drone hit, space stays dark", "bells and tops only, dread exposed", "detuned hits, drone tails, cavernous cuts"),
+  "Soul-sample hip-hop": fw("Chop & Warmth Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, sample-led swing", "fill-led build under the chop", "chorus lands on the full chop and break together", "the chop alone, warm bass underneath", "chop flips, swung fills, warm sub support"),
+  "Down South / Southern trap": fw("Trunk Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, wide chorus lift", "rolling hats and a riser widen the build", "drop is a trunk-rattling long 808 landing", "melody and tops only, sub tail rings out", "rolling hats, wide lifts, long 808 tails"),
+  "East Coast": fw("Hard Snare Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, hard and dusty", "snare-led fill build, hats stay dusty", "chorus cracks in on the snare, no soft landing", "melody and dusty hats only", "snare cracks on 2 and 4, hard fills, solid sub"),
+  "Jazz rap / lo-fi": fw("Dust & Swing Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, dusty swing", "soft brush-style build, vinyl crackle rises", "chorus settles in gently — no drop, a warm return", "chords and crackle only, floor-level energy", "swung soft fills, tape warmth, gentle cuts"),
+  // --- Expansion lanes ---
+  "Milwaukee low-end": fw("Low-End Bounce Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, piano-led bounce", "clap build — handclaps stack bar by bar into the hook", "chorus bounces in on short 808 stabs, piano leads", "piano riff and claps only, low end pulled", "clap stacks, 808 stab answers, bounce fills"),
+  "DMV crank": fw("Crank Call-Response Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, percussion-led", "conga build — call-response percussion stacks up", "chorus cranks in with the full percussion answer", "congas and tops only, kick pulled", "call-response fills, conga runs, chant-space cuts"),
+  Jerk: fw("Pin-Drop Bounce Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, dance pocket", "snap build — snaps and claps trade bars", "chorus pops on the pin-drop kick pattern", "synth stabs and snaps only", "pin-drop kicks, snap accents, playful stop-time pops"),
+  "NY sample drill": fw("Sample-First Drill Frame", "Intro 8 (sample solo) · 3× Verse 16 · 3× Chorus 8 · Outro 8, sample-led drill", "riser under the chop, hats tighten into the hook", "chorus drop rides the chop with a sliding 808 entry", "the chop alone, glide tail exposed", "chop flips at turns, 808 glides, syncopated snare"),
+  "Afro-trap": fw("Polyrhythm Roll Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, polyrhythmic", "shaker build — percussion layers enter one by one", "chorus lands on the full polyrhythm, log-drum under it", "shakers and melody only, trap kit out", "djembe answers, shaker rolls, log-drum touches"),
+  "Hood trap": fw("Raw Space Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, sparse and raw", "minimal riser, tension held in the piano", "drop is one heavy long 808 in open space", "piano only, everything else out", "sparse fills, long 808 tails, hard clap on 3"),
+  "Detroit scam-rap pocket": fw("Scam Rush Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, rushed and frantic", "hat-rush build — hats and claps push ahead of the grid", "chorus lands early and urgent, bending 808 under", "piano loop alone, ghost hats underneath", "rushed clap bursts, off-grid fills, bent 808 turns"),
+  "Florida fast": fw("Fast Burst Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, high-energy bursts", "rapid hat build, kick bursts stack up", "chorus explodes on a kick run and short 808 stabs", "stabs and tops only, momentum held", "kick bursts, rapid rolls, stab answers"),
+  "Texas slab": fw("Slab Drag Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, slow and heavy", "slow swell, snare drags behind the beat", "chorus settles heavy — sub weight, no fast drop", "chopped soul texture alone, sub rings out", "dragged fills, syrupy tails, trunk-weight impacts"),
+  "Chopped & screwed": fw("Chop & Drag Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, slowed and stuttered", "build drags — riser slowed with echo tails", "chorus lands slowed, stutter-chops mark the turns", "chopped segments alone, echo at full width", "stutter-chop edits, dragged rolls, echo throws"),
+  "Drift phonk": fw("Cowbell Drift Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, cowbell-led", "cowbell build — the melody pattern thickens", "chorus drifts in on a saturated 808 slide", "cowbell and loop only, tape hiss up front", "cowbell runs, saturated slides, tape-stop tails"),
+  "Dark trap": fw("Tension Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, sparse tension", "slow minor riser, hats stay restrained", "drop is a distorted 808 hit in open space", "synth tension and tops only, floor-level dread", "distorted hits, sparse rolls, tension cuts"),
+  "Boom trap": fw("Swing-Meets-Sub Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, swung break + sub", "fill build on the break, trap hats enter over it", "chorus lands with break and rolling 808 together", "break alone, sub pulled, chops exposed", "swung fills, un-swung hat runs, rolling 808 turns"),
+  "Afro-drill": fw("Log-Drum Glide Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, glide + log drum", "log-drum build under a dark riser", "chorus drop pairs the 808 glide with a log-drum hit", "log drum and melody only", "glide entries, log-drum answers, syncopated fills"),
+  "Latin trap": fw("Tresillo Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, dembow pull", "tresillo build — the 3-3-2 pattern stacks in", "chorus lands on the full dembow pocket with heavy 808", "melody and tresillo percussion only", "tresillo turns, trap hat rolls, dance-pocket fills"),
+  "Amapiano hip-hop": fw("Log-Drum Anchor Frame", "Intro 8 · 3× Verse 16 · 3× Chorus 8 · Outro 8, log-drum anchored", "shaker build, log drum enters last and anchors", "chorus rolls in on the log-drum line, groove over impact", "piano and shakers only, log drum pulled", "log-drum runs, shaker rolls, jazzy fills"),
+  Grime: fw("Sub Stab Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, sparse and fast", "stab build — square stabs stack, midrange stays empty", "chorus hits on a sub stab, space does the work", "stabs and tops only, sub pulled", "square sub stabs, syncopated cuts, empty-space fills"),
+  "New Orleans bounce": fw("Call-Response Bounce Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, relentless bounce", "shaker build — the break pattern stacks in", "chorus bounces in on the full break, call answered", "break and shakers only, bass pulled", "call-response chops, shaker runs, break fills"),
+  "Digicore / glitch trap": fw("Glitch Maximal Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, maximalist edits", "glitch build — micro-edits stack and stutter up", "chorus slams with bitcrushed weight and sparkle on top", "chiptune sparkle only, kit glitched out", "micro-edit fills, pitch-shifted turns, bitcrush tails"),
+  Tread: fw("Full-Speed Frame", "Intro 4 · 3× Verse 16 · 3× Chorus 8 · Outro 4, ultra-fast", "break-run build — velocity never lets up", "chorus hits at full speed, no half-time relief", "icy synth only, breaks cut dead", "chopped break runs, relentless fills, hard cuts"),
+};
+
+export function frameworkFor(lane: string): FrameworkProfile | undefined {
+  return FRAMEWORKS[lane];
+}
+
+// ---------------------------------------------------------------------------
+// EXPANSION STYLE PROMPTS — 2 Original + 2 Preserve per new lane, each
+// ≤200 chars, no artist names; Preserve carries the exact lock line.
+// Composed from the lane's own texture + drum signature.
+// ---------------------------------------------------------------------------
+
+export interface ExpansionStylePrompt {
+  lane: string;
+  job: JobType;
+  text: string;
+}
+
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+export const EXPANSION_STYLE_PROMPTS: ExpansionStylePrompt[] = (() => {
+  const out: ExpansionStylePrompt[] = [];
+  for (const l of EXPANSION_LANES) {
+    out.push({
+      lane: l.name,
+      job: "original",
+      text: `${cap(l.name)} instrumental, ${l.texture}, ${l.short}.`,
+    });
+    out.push({
+      lane: l.name,
+      job: "original",
+      text: `${cap(l.name)} pocket, ${l.texture}, ${l.short}, fills at the turns, chorus lifts.`,
+    });
+    out.push({
+      lane: l.name,
+      job: "preserve",
+      text: `${LOCK_LINE}. ${cap(l.name)} canvas: ${l.short}, spice only, sample stays lead.`,
+    });
+    out.push({
+      lane: l.name,
+      job: "preserve",
+      text: `${LOCK_LINE}. Add ${l.name} drums: ${l.short}, spice only, sample stays lead.`,
+    });
+  }
+  return out;
+})();
+
+export function expansionStylePromptsFor(
+  job: JobType,
+  lane: string,
+): ExpansionStylePrompt[] {
+  return EXPANSION_STYLE_PROMPTS.filter((p) => p.job === job && p.lane === lane);
+}
+
+export function expansionDrums(lane: string): string | undefined {
+  return expansionLane(lane)?.drums;
+}
+
+// ---------------------------------------------------------------------------
+// ANALYZER AFFINITY — rank every lane against a beat's measurements.
+// Affinities for the original lanes are builder heuristics in the same
+// generic terms (tempo band, brightness, density); expansion lanes use
+// the bands declared on their lane entries.
+// ---------------------------------------------------------------------------
+
+interface Affinity {
+  bpm: [number, number];
+  bright: "dark" | "mid" | "bright" | "any";
+  density: "sparse" | "steady" | "busy" | "any";
+}
+
+const OLD_AFFINITY: Record<string, Affinity> = {
+  Trap: { bpm: [130, 152], bright: "any", density: "steady" },
+  "Chiraq drill": { bpm: [135, 150], bright: "dark", density: "steady" },
+  "UK drill": { bpm: [135, 148], bright: "dark", density: "steady" },
+  "NY drill": { bpm: [135, 150], bright: "mid", density: "busy" },
+  "Boom bap": { bpm: [82, 100], bright: "mid", density: "steady" },
+  "Boom bap revival / conscious": { bpm: [80, 98], bright: "mid", density: "sparse" },
+  "Detroit trap": { bpm: [150, 175], bright: "dark", density: "busy" },
+  "West Coast / G-funk": { bpm: [88, 112], bright: "bright", density: "sparse" },
+  "Memphis phonk / dark trap": { bpm: [118, 145], bright: "dark", density: "steady" },
+  "Gospel trap": { bpm: [125, 150], bright: "bright", density: "steady" },
+  "Cloud rap / dreamo": { bpm: [110, 140], bright: "bright", density: "sparse" },
+  "Trap soul": { bpm: [118, 138], bright: "mid", density: "sparse" },
+  "Jersey club rap": { bpm: [128, 145], bright: "bright", density: "busy" },
+  Plugg: { bpm: [120, 145], bright: "bright", density: "sparse" },
+  Pluggnb: { bpm: [115, 140], bright: "mid", density: "sparse" },
+  Rage: { bpm: [140, 165], bright: "bright", density: "busy" },
+  Horrorcore: { bpm: [110, 140], bright: "dark", density: "sparse" },
+  "Soul-sample hip-hop": { bpm: [85, 115], bright: "mid", density: "steady" },
+  "Down South / Southern trap": { bpm: [120, 145], bright: "mid", density: "steady" },
+  "East Coast": { bpm: [85, 105], bright: "mid", density: "steady" },
+  "Jazz rap / lo-fi": { bpm: [70, 98], bright: "dark", density: "sparse" },
+};
+
+export interface LaneRank {
+  lane: string;
+  score: number;
+  why: string;
+}
+
+export function rankLanesForBeat(
+  bpm: number | null,
+  centroidHz: number,
+  onsetRate: number,
+  limit = 3,
+): LaneRank[] {
+  const brightBand = centroidHz >= 3400 ? "bright" : centroidHz >= 2200 ? "mid" : "dark";
+  const densityBand = onsetRate >= 3 ? "busy" : onsetRate >= 1.6 ? "steady" : "sparse";
+  const scored: LaneRank[] = [];
+  for (const lane of ALL_LANES) {
+    const exp = expansionLane(lane);
+    const aff: Affinity | undefined = exp
+      ? { bpm: exp.bpm, bright: exp.bright, density: exp.density }
+      : OLD_AFFINITY[lane];
+    if (!aff) continue;
+    let score = 0;
+    const why: string[] = [];
+    if (bpm !== null) {
+      const [lo, hi] = aff.bpm;
+      if (bpm >= lo && bpm <= hi) {
+        score += 3;
+        why.push(`tempo sits in its ${lo}–${hi} pocket`);
+      } else if (bpm >= lo / 2 && bpm <= hi / 2 + 8) {
+        score += 1;
+        why.push("tempo fits at half-time");
+      }
+    }
+    if (aff.bright === "any" || aff.bright === brightBand) {
+      score += 1;
+      if (aff.bright !== "any") why.push(`${brightBand} top end matches`);
+    }
+    if (aff.density === "any" || aff.density === densityBand) {
+      score += 1;
+      if (aff.density !== "any") why.push(`${densityBand} hit density matches`);
+    }
+    scored.push({
+      lane,
+      score,
+      why: why.length > 0 ? why.join(" · ") : "nearest available pocket",
+    });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit);
+}
+
+

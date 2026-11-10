@@ -1,0 +1,673 @@
+// SIMPLE bank — prompts written for Suno's Simple mode: ONE text box
+// (the screenshot Boo sent: Simple mode, a single prompt field, +Audio
+// upload, v6). Simple mode has no separate Style / Exclude / Lyrics
+// boxes, so each Simple prompt is a single self-contained paragraph in
+// plain language that does the whole job in that one field: genre and
+// pocket, drum and 808 direction, and the full structure spelled out in
+// words (intro, verses, choruses, builds, drops, fills).
+//
+// This bank is ADDITIVE: every prompt is composed at load time from
+// the existing verified V2 bank and the Ammo bank — those banks' own
+// text is never altered, merged, or overwritten. Preserve forms always
+// carry the exact lock line inside the paragraph. The Simple prompts
+// are NOT fenced off in a silo (Boo's standing approach is additive):
+// they live in their own Simple section AND are woven into the main
+// Library and the Build flow alongside everything else. Only complete
+// duplicates are skipped.
+//
+// No character cap is claimed for the Simple box: the 2026-10-27
+// official-source audit found no published Simple-box cap, so the UI
+// shows character counts as guidance only, never as a Suno limit.
+
+import { ammo, ammoText } from "./ammo";
+import { LOCK_LINE, bank, type JobType } from "./bank";
+import {
+ALL_LANES,
+EXPANSION_STYLE_PROMPTS,
+frameworkFor,
+} from "./expansion";
+import { buildV6LyricsMap, laneDrums } from "./randomize";
+
+export { LOCK_LINE };
+
+/**
+ * Community working size for the Simple-mode prompt: ~3,000 chars,
+ * from maintained Suno v6 best-practice references (Suno itself
+ * publishes no Simple-box cap). Counts in the UI stay labeled
+ * "guidance only" — this figure only drives an over-size warning,
+ * never a claimed Suno limit.
+ */
+export const SIMPLE_WORKING_LIMIT = 3000;
+
+const STRUCTURE_ORIGINAL =
+  "Structure, in words: intro of 8 bars with melody and tops only and a reverse swell in, verse 1 for 16 bars, a build-up with a riser, snare roll and FX sweep into chorus 1 for 8 bars with a heavy drop on bar 1, a post-chorus drop and a stop-time cut, verse 2 for 16 bars with a mid-verse drop-out to melody and tops only then a drop back in on the one, a second build-up into chorus 2 for 8 bars, verse 3 for 16 bars with drum fills closing every 4 bars, a breakdown to melody and tops only, a final build-up at maximum tension, a final chorus for 8 bars with the heaviest drop and a half-time finish, a final drop, and an outro that strips back layer by layer to a tape-stop finish. Fills close the sections, builds rise into every chorus, and cuts and rolls mark the transitions.";
+
+const STRUCTURE_PRESERVE =
+  "Structure, in words: intro with the uploaded sample and sampled vocals playing solo exactly as performed, verse 1 for 16 bars with canvas drums only underneath, a build-up with a riser and snare roll into chorus 1 for 8 bars with a heavy canvas drop on bar 1, a post-chorus drop and a stop-time cut in the canvas only, verse 2 for 16 bars with a mid-verse drop-out back to the sample solo then a drop back in on the one, a second build-up into chorus 2 for 8 bars, verse 3 for 16 bars with canvas fills closing every 4 bars, a breakdown to the sample and tops only, a final build-up, a final chorus for 8 bars with the heaviest canvas drop and a half-time finish, a final drop, and an outro that strips the canvas back so the sample plays out alone to a tape-stop finish. Every fill, build, drop, cut, roll and FX move happens in the canvas drums only — no new lead melody, no new or re-sung vocals.";
+
+const GENERIC_DRUMS =
+  "pocket locked tight, 808 tuned to the key and kept under the lead, fills short at the section turns, space between the hits";
+
+/**
+ * Compose one Simple-box paragraph from a base prompt drawn from the
+ * verified bank or the Ammo bank. The base text is used verbatim as the
+ * opening; the drum/808 direction and the worded structure are appended
+ * so the single field carries everything Simple mode needs.
+ */
+/** Worded structure for a lane — reads from the lane's structural
+ * framework profile so builds, drops and the breakdown sit where
+ * that genre puts them, instead of one shared skeleton. */
+export function simpleStructureFor(lane: string, job: JobType): string {
+  const base = job === "preserve" ? STRUCTURE_PRESERVE : STRUCTURE_ORIGINAL;
+  const fw = frameworkFor(lane);
+  if (!fw) return base;
+  return `${base} Framework — ${fw.name} (${fw.layout}): builds — ${fw.build}; drops — ${fw.drop}; breakdown — ${fw.breakdown}; signature events — ${fw.signature}.`;
+}
+
+export function composeSimple(base: string, lane: string, job: JobType): string {
+  let head = base.trim().replace(/\s+/g, " ");
+  if (job === "preserve" && !head.includes(LOCK_LINE)) {
+    head = `${LOCK_LINE}. ${head}`;
+  }
+  if (head && !/[.!?]$/.test(head)) head += ".";
+  const drums = laneDrums(lane);
+  const drumSentence = `Drums and 808: ${drums === laneDrums("__none__") ? GENERIC_DRUMS : drums}.`;
+  const structure = simpleStructureFor(lane, job);
+  return `${head} ${drumSentence} ${structure}`.replace(/\s+/g, " ").trim();
+}
+
+export interface SimplePrompt {
+  key: string;
+  /** Lane name (verified bank) or Ammo section name. */
+  lane: string;
+  title: string;
+  /** "Lane bank" | "Gospel set" | "Ammo" — where the base came from. */
+  source: string;
+  job: JobType;
+  text: string;
+}
+
+export const SIMPLE_PROMPTS: SimplePrompt[] = (() => {
+  const raw: SimplePrompt[] = [];
+  const items = raw;
+  // The 21 lanes, from the verified V2 bank (Track 1 Original +
+  // Track 2 Preservation style prompts). Track 3 utility add-ons are
+  // fragments, not full beats, so they are not turned into Simple
+  // prompts.
+  bank.style_prompts.forEach((p, i) => {
+    if (p.track !== 1 && p.track !== 2) return;
+    const job: JobType = p.track === 2 ? "preserve" : "original";
+    items.push({
+      key: `simple-lane-${i}`,
+      lane: p.subgenre,
+      title: p.subgenre,
+      source: "Lane bank",
+      job,
+      text: composeSimple(p.text, p.subgenre, job),
+    });
+  });
+  // Expansion lanes — the new subgenre lanes (additive layer in
+  // expansion.ts), composed the same way from their own style prompts.
+  EXPANSION_STYLE_PROMPTS.forEach((p, i) => {
+    items.push({
+      key: `simple-expansion-${i}`,
+      lane: p.lane,
+      title: p.lane,
+      source: "Expansion lane",
+      job: p.job,
+      text: composeSimple(p.text, p.lane, p.job),
+    });
+  });
+  // Gospel set — preserve-only in the bank; the compose step guarantees
+  // the exact lock line leads every one of these paragraphs.
+  bank.gospel_prompts.forEach((p, i) => {
+    items.push({
+      key: `simple-gospel-${i}`,
+      lane: "Gospel trap",
+      title: "Gospel trap",
+      source: `Gospel set · ${p.group}`,
+      job: "preserve",
+      text: composeSimple(p.text, "Gospel trap", "preserve"),
+    });
+  });
+  // Ammo styles — 94 styles × Original/Preserve, kept labeled as the
+  // separate Ammo bank, same as everywhere else in the app.
+  ammo.sections.forEach((sec) => {
+    sec.styles.forEach((st) => {
+      (["original", "preserve"] as const).forEach((job) => {
+        items.push({
+          key: `simple-ammo-${sec.section}-${st.name}-${job}`,
+          lane: sec.section,
+          title: st.name,
+          source: "Ammo",
+          job,
+          text: composeSimple(ammoText(st, job), sec.section, job),
+        });
+      });
+    });
+  });
+  // Skip only complete duplicates — same full paragraph already in.
+  const seen = new Set<string>();
+  return raw.filter((p) => {
+    if (seen.has(p.text)) return false;
+    seen.add(p.text);
+    return true;
+  });
+})();
+
+/** Distinct filter values for the Simple browse list, in bank order. */
+export const SIMPLE_LANES: string[] = (() => {
+  const seen: string[] = [];
+  for (const p of SIMPLE_PROMPTS) {
+    if (!seen.includes(p.lane)) seen.push(p.lane);
+  }
+  return seen;
+})();
+
+export function simplePromptsFor(job: JobType, lane: string): SimplePrompt[] {
+  return SIMPLE_PROMPTS.filter((p) => p.job === job && p.lane === lane);
+}
+
+/** First Simple prompt for a lane/job — the Build screen's default. */
+export function firstSimple(job: JobType, lane: string): SimplePrompt | undefined {
+  return SIMPLE_PROMPTS.find((p) => p.job === job && p.lane === lane);
+}
+
+/** A random Simple prompt, optionally pinned to a job and/or lane. */
+export function randomSimple(job?: JobType, lane?: string): SimplePrompt | undefined {
+  const pool = SIMPLE_PROMPTS.filter(
+    (p) =>
+      (job === undefined || p.job === job) &&
+      (lane === undefined || p.lane === lane),
+  );
+  if (pool.length === 0) return undefined;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** The worded structure sentence for a job — the third layer of an
+ * assembled Simple package, and the tail of every full paragraph. */
+export function simpleStructure(job: JobType): string {
+  return job === "preserve" ? STRUCTURE_PRESERVE : STRUCTURE_ORIGINAL;
+}
+
+// TRANSFORMATION DIRECTIVES — the second Simple shape, mirroring how
+// the Simple box actually gets used (Boo's screenshots, 2026-10-28):
+// the box sits on an uploaded audio and its "+" menu inserts existing
+// content (Lyrics, Styles, Playlist, Image, Video, Audio, Voice), so
+// the prompt itself is a SHORT transformation directive in the shape
+// of Suno's own example — "Turn this into the lofi hip hop version".
+// One per lane, Original and Preserve; Preserve carries the exact lock
+// line. These pair with an inserted style and the worded structure in
+// the package assembler (assembleSimplePackage below).
+export const SIMPLE_DIRECTIVES: SimplePrompt[] = (() => {
+  const items: SimplePrompt[] = [];
+  for (const lane of ALL_LANES) {
+    const drums = laneDrums(lane);
+    items.push({
+      key: `simple-directive-${lane}-original`,
+      lane,
+      title: lane,
+      source: "Directive",
+      job: "original",
+      text: `Turn this into the ${lane} version — ${drums}, verses stay in the pocket, choruses lift.`,
+    });
+    items.push({
+      key: `simple-directive-${lane}-preserve`,
+      lane,
+      title: lane,
+      source: "Directive",
+      job: "preserve",
+      text: `${LOCK_LINE}. Turn this upload into the ${lane} version — ${drums}, spice only, sample stays lead.`,
+    });
+  }
+  return items;
+})();
+
+export function directiveFor(job: JobType, lane: string): SimplePrompt | undefined {
+  return SIMPLE_DIRECTIVES.find((d) => d.job === job && d.lane === lane);
+}
+
+/**
+ * Assemble a Simple package the way the box is actually filled:
+ * transformation directive + an inserted bank style prompt (the "+"
+ * menu's Styles insert) + the worded structure, as one copy-ready
+ * paragraph. The lock line appears once: if both the directive and
+ * the inserted Preserve style carry it, the style's copy is dropped.
+ */
+export function assembleSimplePackage(
+  directive: string,
+  styleText: string,
+  job: JobType,
+): string {
+  const head = directive.trim().replace(/\s+/g, " ");
+  let style = styleText.trim().replace(/\s+/g, " ");
+  if (job === "preserve" && head.includes(LOCK_LINE)) {
+    const prefix = `${LOCK_LINE}. `;
+    if (style.startsWith(prefix)) style = style.slice(prefix.length);
+    else if (style.startsWith(`${LOCK_LINE} — `))
+      style = style.slice(LOCK_LINE.length + 3);
+  }
+  const parts = [head, style, simpleStructure(job)].filter(Boolean);
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+// ---------------------------------------------------------------------------
+// REMIX TEMPLATES — the expansion Boo asked for (2026-10-28): the short
+// "Turn this into the… version" directives were one example of what the
+// Simple box does natively. These templates expand that shape into a
+// diverse array of streamlined but FULL structures for rapid, high-quality
+// remixes of an uploaded beat. Each template is a single paragraph for the
+// one Simple field: a short transformation directive opening ("Turn this
+// upload into…", "Rework this as…", "Flip this into…") followed by a
+// compressed complete structure — intro, 3 verses × 16 bars, 3 choruses ×
+// 8 bars, build-ups, drops, fills, breakdown, outro — worded tightly so
+// the whole song shape survives in Simple-box form.
+// Families per lane/style: Faithful Enhance, Genre Flip, Energy Lift,
+// Stripped / Minimal, Heavy Drop Focus, Half-Time Flip, Bounce Flip.
+// Coverage: all 21 lanes + the strongest Ammo styles, Original + Preserve.
+// Preserve forms always carry the exact lock line. Additive only — no
+// existing bank, Ammo, Simple prompt, or master text is changed; only
+// complete duplicates are skipped. No artist names.
+// ---------------------------------------------------------------------------
+
+export interface RemixTemplate extends SimplePrompt {
+  family: string;
+}
+
+interface RemixFamilyDef {
+  id: string;
+  label: string;
+  open: (name: string) => string;
+  flavorOriginal: (drums: string) => string;
+  flavorPreserve: (drums: string) => string;
+  structOriginal: string;
+  structPreserve: string;
+}
+
+const REMIX_FAMILIES_DEF: RemixFamilyDef[] = [
+  {
+    id: "faithful-enhance",
+    label: "Faithful Enhance",
+    open: (n) => `Turn this upload into a faithful ${n} remix`,
+    flavorOriginal: (d) =>
+      `keep the original pocket, melody and arrangement recognizable, tighten the timing and low end, ${d}, clean finish, no extra lead layers competing with the core`,
+    flavorPreserve: (d) =>
+      `keep the upload's pocket and arrangement exactly recognizable, tighten only the canvas around it, ${d}, spice only, sample stays lead`,
+    structOriginal:
+      "Streamlined full structure: intro 8 bars melody and tops only with a reverse swell in, verse 1 16 bars, build-up with riser and snare roll into chorus 1 8 bars with a drop on bar 1, post-chorus drop and a fill out, verse 2 16 bars with fills closing every 4 bars and a mid-verse drop-out to melody and tops only then a drop back in on the one, second build-up into chorus 2 8 bars, verse 3 16 bars, breakdown 8 bars melody and tops only, final build-up, chorus 3 8 bars with the heaviest drop, final drop, outro 8 bars stripping back layer by layer to a tape-stop finish. Fills close every section, cuts and rolls mark the transitions.",
+    structPreserve:
+      "Streamlined full structure, canvas only: intro 8 bars with the sample and sampled vocals solo exactly as performed, verse 1 16 bars canvas underneath, build-up with canvas riser and snare roll into chorus 1 8 bars with a canvas drop on bar 1, post-chorus canvas drop, verse 2 16 bars with canvas fills every 4 bars and a mid-verse canvas drop-out back to the sample solo then a drop back in on the one, second build-up into chorus 2 8 bars, verse 3 16 bars, breakdown 8 bars sample and tops only, final build-up, chorus 3 8 bars with the heaviest canvas drop, final drop, outro 8 bars canvas strips back so the sample plays out alone to a tape-stop finish. Every fill, build, drop, cut and roll happens in the canvas only.",
+  },
+  {
+    id: "genre-flip",
+    label: "Genre Flip",
+    open: (n) => `Flip this into a full ${n} version`,
+    flavorOriginal: (d) =>
+      `re-pocket the whole beat into this lane from the drums up, ${d}, new groove throughout while the song shape and hook placement stay exactly where they were`,
+    flavorPreserve: (d) =>
+      `re-pocket only the canvas into this lane from the drums up, ${d}, new canvas groove throughout while the sample, its timing and the hook placement stay exactly where they were, spice only, sample stays lead`,
+    structOriginal:
+      "Streamlined full structure in the new pocket: intro 8 bars melody and tops only flipped to the new groove, reverse swell in, verse 1 16 bars in the flipped pocket, build-up with riser, snare roll and FX sweep into chorus 1 8 bars with a drop on bar 1, post-chorus drop, verse 2 16 bars with a mid-verse drop-out to melody and tops only then a drop back in, build-up into chorus 2 8 bars bigger than the first, verse 3 16 bars with fills answering every 4 bars, breakdown 8 bars melody and tops only, final build-up at maximum tension, chorus 3 8 bars with the heaviest drop and a half-time tail, final drop, outro 8 bars strip back to a tape-stop finish.",
+    structPreserve:
+      "Streamlined full structure in the new canvas pocket: intro 8 bars sample solo exactly as performed, verse 1 16 bars canvas flipped underneath, build-up with canvas riser and snare roll into chorus 1 8 bars canvas drop on bar 1, post-chorus canvas drop, verse 2 16 bars with a mid-verse canvas drop-out to the sample solo then a drop back in, build-up into chorus 2 8 bars, verse 3 16 bars canvas fills every 4 bars, breakdown 8 bars sample and tops only, final build-up, chorus 3 8 bars heaviest canvas drop with a half-time tail, final drop, outro 8 bars canvas strips back so the sample plays out alone to a tape-stop finish. The flip lives in the canvas only.",
+  },
+  {
+    id: "energy-lift",
+    label: "Energy Lift",
+    open: (n) => `Rework this as a high-energy ${n} remix`,
+    flavorOriginal: (d) =>
+      `lift the energy one full level without changing the song, faster-feeling momentum, ${d}, choruses hit harder than the verses every time, momentum never sags`,
+    flavorPreserve: (d) =>
+      `lift the energy one full level in the canvas only without changing the song, ${d}, canvas choruses hit harder than the verses every time, spice only, sample stays lead`,
+    structOriginal:
+      "Streamlined full structure, energy-forward: intro 8 bars melody and tops only with a rising reverse swell, verse 1 16 bars driving from bar 1, long build-up with riser, snare roll building 8ths to 32nds and hat acceleration into chorus 1 8 bars with a heavy drop on bar 1, post-chorus drop at full weight, verse 2 16 bars with fills closing every 4 bars and a short drop-out then an impact drop-in, bigger build-up into chorus 2 8 bars, verse 3 16 bars pushing hardest, breakdown 8 bars melody and tops only kept brief and tense, final build-up at maximum tension, chorus 3 8 bars with the heaviest drop of the track, final drop, outro 8 bars strip back fast to a tape-stop finish.",
+    structPreserve:
+      "Streamlined full structure, energy-forward in the canvas only: intro 8 bars sample solo exactly as performed with a canvas riser underneath, verse 1 16 bars canvas driving from bar 1, long canvas build-up with riser and snare roll 8ths to 32nds into chorus 1 8 bars heavy canvas drop on bar 1, post-chorus canvas drop at full weight, verse 2 16 bars canvas fills every 4 bars with a short canvas drop-out to the sample solo then an impact drop-in, bigger build-up into chorus 2 8 bars, verse 3 16 bars, breakdown 8 bars sample and tops only kept brief and tense, final build-up, chorus 3 8 bars heaviest canvas drop, final drop, outro 8 bars canvas strips back so the sample plays out alone to a tape-stop finish.",
+  },
+  {
+    id: "stripped-minimal",
+    label: "Stripped / Minimal",
+    open: (n) => `Rework this as a stripped-back ${n} remix`,
+    flavorOriginal: (d) =>
+      `minimal and spacious, half the hits removed on purpose, ${d}, one idea per section, silence and space do the heavy lifting, nothing stacks twice`,
+    flavorPreserve: (d) =>
+      `minimal and spacious in the canvas only, half the canvas hits removed on purpose, ${d}, one canvas idea per section, space around the sample does the heavy lifting, spice only, sample stays lead`,
+    structOriginal:
+      "Streamlined full structure, stripped: intro 8 bars melody and tops only, lots of air, verse 1 16 bars sparse drums with fills kept to a single short fill at bar 16, short build-up with a lone riser into chorus 1 8 bars with a restrained drop on bar 1, post-chorus drop cut short, verse 2 16 bars opening with an extended melody-and-tops-only stretch then a drop back in on the one, quiet build-up into chorus 2 8 bars, verse 3 16 bars sparsest of all, breakdown 8 bars melody and tops only at floor level, final build-up from almost nothing, chorus 3 8 bars with one heavy drop then immediate space, final drop cut short, outro 8 bars stripping to the core motif alone and a tape-stop finish.",
+    structPreserve:
+      "Streamlined full structure, stripped in the canvas only: intro 8 bars sample solo exactly as performed, verse 1 16 bars sparse canvas underneath with a single short canvas fill at bar 16, short canvas build-up with a lone riser into chorus 1 8 bars restrained canvas drop on bar 1, post-chorus canvas drop cut short, verse 2 16 bars opening with an extended sample-solo stretch then canvas drops back in on the one, quiet build-up into chorus 2 8 bars, verse 3 16 bars sparsest canvas of all, breakdown 8 bars sample and tops only, final build-up from almost nothing, chorus 3 8 bars one heavy canvas drop then immediate space, final drop cut short, outro 8 bars canvas strips away so the sample plays out alone to a tape-stop finish.",
+  },
+  {
+    id: "heavy-drop",
+    label: "Heavy Drop Focus",
+    open: (n) => `Turn this upload into a drop-focused ${n} remix`,
+    flavorOriginal: (d) =>
+      `arrange everything around the drops, verses stay lean so the choruses land massive, ${d}, drops are the loudest and widest moments in the track`,
+    flavorPreserve: (d) =>
+      `arrange the canvas around the drops, verses stay lean in the canvas so the choruses land massive, ${d}, canvas drops are the loudest and widest moments, spice only, sample stays lead`,
+    structOriginal:
+      "Streamlined full structure, drop-led: intro 8 bars melody and tops only with a reverse swell and an impact teasing the first drop, verse 1 16 bars lean and tight, extended build-up with riser, snare roll and a one-beat stop-time cut into chorus 1 8 bars with a heavy drop on bar 1, post-chorus drop extended 8 bars at full weight, verse 2 16 bars lean again with a mid-verse drop-out then a drop back in, build-up into chorus 2 8 bars with a bigger drop, verse 3 16 bars with fills only at the section turns, breakdown 8 bars melody and tops only dropping the energy to the floor, final build-up at maximum tension with a full cut before it, chorus 3 8 bars with the heaviest drop of the track, final drop extended, outro 8 bars strip back to a tape-stop finish.",
+    structPreserve:
+      "Streamlined full structure, drop-led in the canvas only: intro 8 bars sample solo exactly as performed with a quiet canvas swell underneath, verse 1 16 bars lean canvas underneath, extended canvas build-up with riser and snare roll and a one-beat canvas stop-time cut into chorus 1 8 bars heavy canvas drop on bar 1, post-chorus canvas drop extended 8 bars at full weight, verse 2 16 bars with a mid-verse canvas drop-out to the sample solo then a drop back in, build-up into chorus 2 8 bars bigger canvas drop, verse 3 16 bars canvas fills only at the turns, breakdown 8 bars sample and tops only, final build-up with a full canvas cut before it, chorus 3 8 bars heaviest canvas drop, final drop extended, outro 8 bars canvas strips back so the sample plays out alone to a tape-stop finish.",
+  },
+  {
+    id: "half-time-flip",
+    label: "Half-Time Flip",
+    open: (n) => `Flip this into a half-time ${n} remix`,
+    flavorOriginal: (d) =>
+      `half-time feel throughout, snare weight doubled, wide slow pocket with fast hat detail on top, ${d}, choruses open up into the half-time sway`,
+    flavorPreserve: (d) =>
+      `half-time feel in the canvas only, snare weight doubled, wide slow canvas pocket with fast hat detail on top, ${d}, canvas choruses open into the half-time sway, spice only, sample stays lead`,
+    structOriginal:
+      "Streamlined full structure in half-time: intro 8 bars melody and tops only, reverse swell in, verse 1 16 bars half-time pocket from bar 1, build-up with riser and a snare roll that stretches into half-time into chorus 1 8 bars with a half-time drop on bar 1, post-chorus drop half-time and heavy, verse 2 16 bars with a mid-verse drop-out to melody and tops only then a half-time drop back in, build-up into chorus 2 8 bars, verse 3 16 bars with fills closing every 4 bars in half-time, breakdown 8 bars melody and tops only, final build-up, chorus 3 8 bars heaviest half-time drop with a slow victory-lap tail, final drop, outro 8 bars strip back to a tape-stop finish.",
+    structPreserve:
+      "Streamlined full structure in half-time, canvas only: intro 8 bars sample solo exactly as performed, verse 1 16 bars half-time canvas underneath from bar 1, build-up with canvas riser and a snare roll stretching into half-time into chorus 1 8 bars half-time canvas drop on bar 1, post-chorus canvas drop half-time and heavy, verse 2 16 bars with a mid-verse canvas drop-out to the sample solo then a half-time drop back in, build-up into chorus 2 8 bars, verse 3 16 bars canvas fills every 4 bars in half-time, breakdown 8 bars sample and tops only, final build-up, chorus 3 8 bars heaviest half-time canvas drop, final drop, outro 8 bars canvas strips back so the sample plays out alone to a tape-stop finish.",
+  },
+  {
+    id: "bounce-flip",
+    label: "Bounce Flip",
+    open: (n) => `Turn this upload into a bouncing ${n} remix`,
+    flavorOriginal: (d) =>
+      `bounce pocket throughout, drums swing and answer each other, call-and-response fills, ${d}, choruses bounce harder than the verses, made to move`,
+    flavorPreserve: (d) =>
+      `bounce pocket in the canvas only, canvas drums swing and answer each other under the sample, call-and-response canvas fills, ${d}, canvas choruses bounce harder than the verses, spice only, sample stays lead`,
+    structOriginal:
+      "Streamlined full structure with bounce: intro 8 bars melody and tops only with a bouncing top line, reverse swell in, verse 1 16 bars bounce pocket from bar 1, build-up with riser, snare roll and bouncing hat detail into chorus 1 8 bars with a drop on bar 1 and extra bounce in the tops, post-chorus drop with a bounce tail, verse 2 16 bars with call-and-response fills every 4 bars and a mid-verse drop-out to melody and tops only then a bounce drop-in, build-up into chorus 2 8 bars, verse 3 16 bars bounce at its loosest, breakdown 8 bars melody and tops only keeping a faint bounce pulse, final build-up, chorus 3 8 bars heaviest drop with the bounce at full width, final drop, outro 8 bars strip back to a tape-stop finish.",
+    structPreserve:
+      "Streamlined full structure with bounce, canvas only: intro 8 bars sample solo exactly as performed, verse 1 16 bars bouncing canvas underneath from bar 1, build-up with canvas riser and snare roll into chorus 1 8 bars canvas drop on bar 1 with extra bounce in the canvas tops, post-chorus canvas drop with a bounce tail, verse 2 16 bars call-and-response canvas fills every 4 bars with a mid-verse canvas drop-out to the sample solo then a bounce drop-in, build-up into chorus 2 8 bars, verse 3 16 bars bounce at its loosest in the canvas, breakdown 8 bars sample and tops only with a faint canvas pulse, final build-up, chorus 3 8 bars heaviest canvas drop with the bounce at full width, final drop, outro 8 bars canvas strips back so the sample plays out alone to a tape-stop finish.",
+  },
+];
+
+export const REMIX_FAMILIES: string[] = REMIX_FAMILIES_DEF.map((f) => f.label);
+
+/** Strongest Ammo styles picked for remixes — one or two per major
+ * Ammo family, chosen for distinct, remix-friendly pockets. */
+const STRONGEST_AMMO: { name: string; drumsLane: string }[] = [
+  { name: "Trap", drumsLane: "Trap" },
+  { name: "Boom Bap (1980s–1990s)", drumsLane: "Boom bap" },
+  { name: "UK Drill", drumsLane: "UK drill" },
+  { name: "Drill (Chicago)", drumsLane: "Chiraq drill" },
+  { name: "Brooklyn Drill", drumsLane: "NY drill" },
+  { name: "Cloud Rap", drumsLane: "Cloud rap / dreamo" },
+  { name: "Trap Soul", drumsLane: "Trap soul" },
+  { name: "Rage", drumsLane: "Rage" },
+  { name: "Phonk", drumsLane: "Memphis phonk / dark trap" },
+  { name: "G-Funk", drumsLane: "West Coast / G-funk" },
+  { name: "Jersey Club / Philly Goats", drumsLane: "Jersey club rap" },
+  { name: "Detroit Rap / Motor City Trap", drumsLane: "Detroit trap" },
+  { name: "New Orleans Bounce", drumsLane: "Jersey club rap" },
+  { name: "Jazz Rap", drumsLane: "Jazz rap / lo-fi" },
+];
+
+function composeRemix(
+  displayName: string,
+  drumsLane: string,
+  family: RemixFamilyDef,
+  job: JobType,
+): string {
+  const drums = laneDrums(drumsLane);
+  const opening = family.open(displayName);
+  const fw = frameworkFor(displayName);
+  const sig = fw ? ` Signature events: ${fw.signature}; drops — ${fw.drop}.` : "";
+  if (job === "preserve") {
+    const flavor = family.flavorPreserve(drums);
+    return `${LOCK_LINE}. ${opening} — ${flavor}. ${family.structPreserve}${sig}`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  const flavor = family.flavorOriginal(drums);
+  return `${opening} — ${flavor}. ${family.structOriginal}${sig}`
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export const REMIX_TEMPLATES: RemixTemplate[] = (() => {
+  const raw: RemixTemplate[] = [];
+  // All lanes (21 verified-bank + expansion lanes) × 7 families × 2 jobs.
+  for (const lane of ALL_LANES) {
+    for (const fam of REMIX_FAMILIES_DEF) {
+      for (const job of ["original", "preserve"] as const) {
+        raw.push({
+          key: `remix-lane-${lane}-${fam.id}-${job}`,
+          lane,
+          title: `${lane} — ${fam.label}`,
+          source: `Remix · ${fam.label}`,
+          job,
+          family: fam.label,
+          text: composeRemix(lane, lane, fam, job),
+        });
+      }
+    }
+  }
+  // Strongest Ammo styles × 7 families × 2 jobs.
+  for (const entry of STRONGEST_AMMO) {
+    // Only include styles that actually exist in the Ammo bank.
+    const exists = ammo.sections.some((sec) =>
+      sec.styles.some((st) => st.name === entry.name),
+    );
+    if (!exists) continue;
+    for (const fam of REMIX_FAMILIES_DEF) {
+      for (const job of ["original", "preserve"] as const) {
+        raw.push({
+          key: `remix-ammo-${entry.name}-${fam.id}-${job}`,
+          lane: entry.name,
+          title: `${entry.name} — ${fam.label}`,
+          source: `Remix · Ammo · ${fam.label}`,
+          job,
+          family: fam.label,
+          text: composeRemix(entry.name, entry.drumsLane, fam, job),
+        });
+      }
+    }
+  }
+  const seen = new Set<string>();
+  return raw.filter((t) => {
+    if (seen.has(t.text)) return false;
+    seen.add(t.text);
+    return true;
+  });
+})();
+
+export function remixTemplatesFor(
+  job?: JobType,
+  lane?: string,
+  family?: string,
+): RemixTemplate[] {
+  return REMIX_TEMPLATES.filter(
+    (t) =>
+      (job === undefined || t.job === job) &&
+      (lane === undefined || t.lane === lane) &&
+      (family === undefined || family === "all" || t.family === family),
+  );
+}
+
+export function randomRemix(
+  job?: JobType,
+  lane?: string,
+  family?: string,
+): RemixTemplate | undefined {
+  const pool = remixTemplatesFor(job, lane, family);
+  if (pool.length === 0) return undefined;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** Remix template pinned to an analyzed beat's measured lane — the
+ * Faithful Enhance family by default, or a named family when given. */
+export function remixFromAnalysis(
+  a: { suggestedLane: string },
+  job: JobType,
+  family = "Faithful Enhance",
+): RemixTemplate | undefined {
+  return (
+    REMIX_TEMPLATES.find(
+      (t) => t.job === job && t.lane === a.suggestedLane && t.family === family,
+    ) ?? randomRemix(job, a.suggestedLane)
+  );
+}
+
+/**
+ * Assemble a Simple package headed by a remix template instead of the
+ * short directive: remix template + an inserted bank style prompt, as
+ * one copy-ready paste. The lock line appears once on Preserve jobs.
+ */
+export function assembleRemixPackage(
+  remixText: string,
+  styleText: string,
+  job: JobType,
+): string {
+  const head = remixText.trim().replace(/\s+/g, " ");
+  let style = styleText.trim().replace(/\s+/g, " ");
+  if (job === "preserve" && head.includes(LOCK_LINE)) {
+    const prefix = `${LOCK_LINE}. `;
+    if (style.startsWith(prefix)) style = style.slice(prefix.length);
+    else if (style.startsWith(`${LOCK_LINE} — `))
+      style = style.slice(LOCK_LINE.length + 3);
+  }
+  if (!style) return head;
+  const styleSentence = /[.!?]$/.test(style) ? style : `${style}.`;
+  return `${head} Inserted style: ${styleSentence}`.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * A full structural FRAMEWORK generated from a beat's measurements —
+ * the measured lane's framework profile (section layout with bar
+ * counts, builds / drops / breakdown placed per that lane's frame,
+ * the full event family) fitted to the measured pocket, key, low end,
+ * brightness and density. This is a Lyrics-map-shaped framework, not
+ * a style prompt.
+ *
+ * PRESERVATION LAW (mandatory on the Preserve framework): it LEADS
+ * with the exact lock line; every section directive in the underlying
+ * map is tagged sample-untouched; all fills, builds, drops, rolls and
+ * FX events are canvas-only (drums / 808s / extras) — never re-chop,
+ * re-perform or restyle the sample or the sampled vocals. It pairs
+ * with the Extend route. The Original framework may arrange freely.
+ */
+export function frameworkFromAnalysis(
+  a: {
+    suggestedLane: string;
+    pocketLabel: string;
+    keyName: string | null;
+    lowShare: number;
+    centroidHz: number;
+    onsetRate: number;
+    sampleWordsText?: string;
+    sampleWordsKind?: "clear" | "fragment";
+  },
+  job: JobType,
+): string {
+  const fw = frameworkFor(a.suggestedLane);
+  const keyPart = a.keyName ? `, ${a.keyName}` : "";
+  // Header stays short on purpose: the full measured descriptors live
+  // in the analysis style prompts, and the framework must stay inside
+  // the 5,000-char Lyrics cap when loaded into Build.
+  const measured = `${a.pocketLabel}${keyPart}`;
+  let map = buildV6LyricsMap(a.suggestedLane, job);
+  if (job === "preserve") {
+    // The framework head already carries the lock line and the
+    // canvas-only law, so the map's own lock parenthetical (its
+    // second line) is dropped in this composition — that keeps a
+    // framework carrying sample words inside the Lyrics cap. Every
+    // section directive still carries its sample-untouched tag.
+    map = map
+      .split("\n")
+      .filter((line) => !line.startsWith(`(${LOCK_LINE} —`))
+      .join("\n");
+  }
+  // Sample content — only words actually entered as heard (never
+  // invented or completed by the app), labeled clear or fragment.
+  // The sampled vocals are part of the original recording and stay
+  // preservation-locked regardless of what they say.
+  //
+  // Cap safety (measured defect): the sample line rides ON TOP of a
+  // map that already runs to ~4,760 chars for the longest lane, so
+  // long entered words pushed EVERY lane's framework over the
+  // 5,000-char Lyrics cap (a 500-char entry measured 5,052–5,375
+  // across all 41 lanes). The entry field caps at 120 chars, and
+  // this composition trims the quoted words to fit as a last resort —
+  // the trim is visible (an ellipsis inside the quote), never silent.
+  const rawWords = (a.sampleWordsText ?? "").trim();
+  const words = rawWords.slice(0, 120);
+  const wordsTrimmed = rawWords.length > words.length;
+  const shownWords = wordsTrimmed ? `${words}…` : words;
+  const sampleLine = words
+    ? a.sampleWordsKind === "fragment"
+      ? `[Sample content — fragment, partial words only: "${shownWords}" — sampled vocals stay exactly as performed, preservation-locked]`
+      : `[Sample content — sampled vocals, preservation-locked: "${shownWords}"]`
+    : null;
+  if (job === "preserve") {
+    const head = [
+      LOCK_LINE,
+      `[Analysis framework: ${fw ? fw.name : "v6 detailed structure"} · ${a.suggestedLane} · ${measured}]`,
+      `(Canvas-only events. Never re-chop, re-perform or restyle the sample or sampled vocals. Route: Extend.)`,
+    ].join("\n");
+    return sampleLine ? `${head}\n${sampleLine}\n${map}` : `${head}\n${map}`;
+  }
+  const head = [
+    `[Analysis framework: ${fw ? fw.name : "v6 detailed structure"} · ${a.suggestedLane} · ${measured}]`,
+    `(Arranged freely from the measurements — builds, drops and breakdown placed per this lane's framework.)`,
+  ].join("\n");
+  return sampleLine ? `${head}\n${sampleLine}\n${map}` : `${head}\n${map}`;
+}
+
+function lowDesc(lowShare: number): string {
+  if (lowShare >= 0.45) return "heavy low end already in the pocket";
+  if (lowShare >= 0.3) return "solid low end under the sample";
+  return "lean low end, room for sub and 808 support";
+}
+
+function brightDesc(centroidHz: number): string {
+  if (centroidHz >= 3800) return "bright top end, hats and air up front";
+  if (centroidHz >= 2400) return "balanced top end";
+  return "dark, dusty top end with rolled-off highs";
+}
+
+function densityDesc(onsetRate: number): string {
+  if (onsetRate >= 3.5) return "busy hit density, drums stay active";
+  if (onsetRate >= 1.8) return "steady hit density";
+  return "sparse hit density with lots of open space";
+}
+
+/**
+ * A Simple-box paragraph built from a beat's on-device measurements —
+ * lane-pinned to the measured lane, exactly like the Build handoff.
+ * Preserve carries the exact lock line inside the paragraph.
+ */
+export function simpleFromAnalysis(
+  a: {
+    suggestedLane: string;
+    pocketLabel: string;
+    keyName: string | null;
+    lowShare: number;
+    centroidHz: number;
+    onsetRate: number;
+    sampleWordsText?: string;
+    sampleWordsKind?: "clear" | "fragment";
+  },
+  job: JobType,
+): string {
+  const keyPart = a.keyName ? `, ${a.keyName} tonal center` : "";
+  const measured =
+    `${a.pocketLabel}${keyPart}, ${lowDesc(a.lowShare)}, ` +
+    `${brightDesc(a.centroidHz)}, ${densityDesc(a.onsetRate)}`;
+  const drums = laneDrums(a.suggestedLane);
+  const words = (a.sampleWordsText ?? "").trim();
+  const sampleSentence = words
+    ? a.sampleWordsKind === "fragment"
+      ? ` Sample says (fragment, partial words only): "${words}".`
+      : ` Sample says: "${words}".`
+    : "";
+  if (job === "preserve") {
+    const head =
+      `${LOCK_LINE}. Enhance this ${a.suggestedLane} upload — ${measured}.${sampleSentence} ` +
+      `Drums, 808s and texture are the canvas only, spice only, sample stays lead. ` +
+      `Drums and 808: ${drums}.`;
+    return `${head} ${simpleStructureFor(a.suggestedLane, "preserve")}`;
+  }
+  const head =
+    `${a.suggestedLane} instrumental — ${measured}, drums and 808s lead the arrangement.${sampleSentence} ` +
+    `Drums and 808: ${drums}.`;
+  return `${head} ${simpleStructureFor(a.suggestedLane, "original")}`;
+}
+
+

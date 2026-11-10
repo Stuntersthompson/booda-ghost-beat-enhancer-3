@@ -1,0 +1,297 @@
+// Randomize + layering for the Build screen.
+//
+// Every random pick draws from the real banks (verified V2 prompts, the
+// Ammo bank's technical moves, the real exclude banks) — nothing is
+// invented at random time. Settings randomize only inside Boo's tested
+// bands from the bank's settings cards:
+//   Preserve (Card 1, Boo-tested): Variety 0 · Weirdness 20–30 ·
+//     Style Influence 65–75 · Audio Influence 75–85 · Model v6
+//   Original (Card 2): Variety 0 while testing · Weirdness 20–40 ·
+//     Style Influence 65–85 · Model v6 / v6-mini / v6-wild
+// Preserve output always carries the exact lock line; assembly enforces
+// the Style cap by trimming the slot layer first, then the move layer —
+// the base prompt and the lock line are never cut.
+
+import { ammo, moveLayerText, type AmmoMove } from "./ammo";
+import { LOCK_LINE, bank, type JobType } from "./bank";
+import { expansionDrums, frameworkFor } from "./expansion";
+
+export function pick<T>(arr: readonly T[]): T | undefined {
+  if (arr.length === 0) return undefined;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+export function randInt(min: number, max: number): number {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+export interface RandomSettings {
+  model: string;
+  variety: number;
+  weirdness: number;
+  styleInfluence: number;
+  audioInfluence: number;
+  // Max Mode is deliberately NOT randomized. The bank's own settings
+  // cards scope it to tracks over ~2 minutes, and current Suno
+  // references put a Max Mode generation at double the standard cost
+  // (20 credits vs 10) — a coin flip must never silently double what
+  // a take costs. Shuffle leaves the toggle exactly where Boo set it.
+}
+
+export function randomSettings(job: JobType): RandomSettings {
+  if (job === "preserve") {
+    return {
+      model: "v6",
+      variety: 0,
+      weirdness: randInt(20, 30),
+      styleInfluence: randInt(65, 75),
+      audioInfluence: randInt(75, 85),
+    };
+  }
+  return {
+    model: pick(["v6", "v6", "v6-mini", "v6-wild"]) ?? "v6",
+    variety: 0,
+    weirdness: randInt(20, 40),
+    styleInfluence: randInt(65, 85),
+    audioInfluence: 80,
+  };
+}
+
+/** Random exclude-bank combo. Preserve jobs always keep the vocal defense. */
+export function randomExcludeSel(job: JobType): string[] {
+  const names = bank.exclude_banks.map((b) => b.name);
+  const vocal = names[0];
+  const rest = names.slice(1).filter(() => Math.random() < 0.6);
+  const sel = job === "preserve" && vocal ? [vocal, ...rest] : rest;
+  if (sel.length === 0) {
+    const one = pick(names);
+    return one ? [one] : [];
+  }
+  return sel;
+}
+
+export function randomMove(job: JobType): { move: AmmoMove; layer: string } | null {
+  const move = pick(ammo.technical_moves);
+  if (!move) return null;
+  return { move, layer: moveLayerText(move, job) };
+}
+
+/** Short slot-detail lines that layer under a base prompt. */
+export const SLOT_DETAILS: string[] = [
+  "vinyl crackle low under everything, tape hiss as character",
+  "short 808 tails, kick wins the low end, sub stays clean",
+  "hats swing off the grid, snare dry and forward",
+  "one percussion variation per section, nothing stacks twice",
+  "wide stereo texture, center stays locked on the lead",
+  "tape saturation on the drums only, low-pass warmth",
+  "space between hits, reverb tails short and dark",
+  "808 root slides only at section turns",
+  "dusty sample chops at the edges, center untouched",
+  "transitions by drum fills only, no risers",
+];
+
+/**
+ * Layered Style assembly: base prompt + technical-move layer + slot
+ * detail. On Preserve jobs the exact lock line is guaranteed present
+ * (added at the front if the base lost it). Result is capped at the
+ * Style limit: slot layer is dropped first, then the move layer.
+ */
+export function assembleStyle(
+  base: string,
+  moveLayer: string,
+  slotDetail: string,
+  job: JobType,
+  limit = 1000,
+): string {
+  let out = base.trim();
+  if (job === "preserve" && !out.includes(LOCK_LINE)) {
+    out = out ? `${LOCK_LINE}. ${out}` : `${LOCK_LINE}.`;
+  }
+  const layers = [moveLayer.trim(), slotDetail.trim()].filter(Boolean);
+  for (const layer of layers) {
+    const candidate = out ? `${out} ${layer}` : layer;
+    if (candidate.length <= limit) out = candidate;
+  }
+  if (out.length > limit) out = out.slice(0, limit).trimEnd();
+  return out;
+}
+
+/** Per-lane drum signatures for the v6 section maps. */
+const LANE_DRUMS: Record<string, string> = {
+  Trap: "half-time snare on beat 3, rapid hi-hat rolls mixing 16ths, triplets and 32nds, sparse syncopated kick, long tuned 808 as kick and bass in one with root slides",
+  "Chiraq drill": "direct drill drums, hard kick and snare, sliding 808 hits on the off-beats, tight hats, no swing",
+  "UK drill": "sliding 808 glides, syncopated drill snare pattern, shuffled hats, dark piano space between hits",
+  "NY drill": "punchy drill kick and snare, short sliding 808 hits, crisp hats, aggressive pocket",
+  "Boom bap": "swung kick and snare on 2 and 4, dusty break feel, chopped hats, warm sub support, no slides",
+  "Boom bap revival / conscious": "swung boom bap drums, live-feel snare, warm rounded sub, sparse hats, head-nod pocket",
+  "Detroit trap": "fast off-kilter hats, dry snare, saturated bending 808, urgent Detroit pocket, drums push ahead of the beat",
+  "West Coast / G-funk": "laid-back funk pocket, deep round sub bass, crisp snare, talkbox-style glide space, drums behind the beat",
+  "Memphis phonk / dark trap": "lo-fi Memphis drums, cowbell accents, triplet hats, distorted 808 hits kept restrained",
+  "Gospel trap": "organ and choir space over trap drums, half-time snare on 3, long tuned 808 support, lifts at the hook",
+  "Cloud rap / dreamo": "soft washed drums, sparse 808, airy hats, wide pads, drums float under the texture",
+  "Trap soul": "smooth trap drums, soft snare, melodic 808 slides, R&B pocket, space for vocal-style leads",
+  "Jersey club rap": "club kick pattern, chopped breaks, fast bounce drums, 808 kept short and punchy",
+  Plugg: "light airy drums, soft 808, video-game sparkle space, minimalist pocket",
+  Pluggnb: "smooth plugg drums, melodic 808 glides, soft snare, dreamy R&B pocket",
+  Rage: "distorted rage drums, hard clipped 808, aggressive hats, synth lead energy in the drums",
+  Horrorcore: "dark sparse drums, detuned hits, heavy 808 drones, menacing space between hits",
+  "Soul-sample hip-hop": "swung boom bap drums, snare on 2 and 4, sampled-style warm bass and sub under the chop",
+  "Down South / Southern trap": "big Southern trap drums, rolling hats, trunk-rattling long 808, wide chorus lift",
+  "East Coast": "hard East Coast drums, snare cracks on 2 and 4, dusty hats, solid sub support",
+  "Jazz rap / lo-fi": "dusty swung lo-fi drums, soft kick, gentle rounded sub, vinyl texture over everything",
+};
+
+export function laneDrums(lane: string): string {
+  return (
+    LANE_DRUMS[lane] ??
+    expansionDrums(lane) ??
+    "lane drums locked on the pocket, 808 support underneath, fills kept short"
+  );
+}
+
+/**
+ * v6 detailed-structure lyrics map for a lane — Boo's standing full-song
+ * layout: Intro → 3 verses at 16 bars → 3 choruses at 8 bars → Outro,
+ * with event-level production detail placed by the placement law:
+ * fills close sections, build-ups rise into hooks, the breakdown sits
+ * before the final chorus, heavy drops land after choruses, and
+ * cuts/rolls mark the transitions. Event family used across the map:
+ * drum fills, risers and build-ups, breakdowns, heavy drops and
+ * post-chorus drops, stop-time / drop cuts, snare rolls and hi-hat
+ * rolls, FX sweeps, reverse swells, tape stops, impact hits,
+ * melody-and-tops-only passages, beat drop-outs and drop-ins, and
+ * half-time switches. Bracket + parenthetical format, closes with
+ * [End], stays inside the Lyrics cap. This is the structure-upgrade
+ * layer — authored for Suno v6, separate from the bank's own
+ * templates, which stay word-for-word intact. Preserve maps carry the
+ * exact lock line up top and keep the sample-untouched directive in
+ * every section: all events happen in the canvas drums only.
+ */
+export function buildV6LyricsMap(lane: string, job: JobType): string {
+  const drums = laneDrums(lane);
+  // Structural framework for this lane — builds, drops and the
+  // breakdown follow the lane's own named frame, not one shared
+  // skeleton (see expansion.ts FRAMEWORKS).
+  const fw = frameworkFor(lane);
+  const fwName = fw ? `, framework: ${fw.name}` : "";
+  const buildP = fw
+    ? `canvas build — ${fw.build}`
+    : "canvas riser climbs, snare roll builds from 8ths to 32nds, hats accelerate, 808 pulls back to a sub layer";
+  const dropP = fw
+    ? `canvas drop — ${fw.drop}`
+    : "canvas drums and 808 at peak spice weight, sample stays lead on top";
+  const breakP = fw
+    ? `canvas breakdown — ${fw.breakdown}`
+    : "uploaded sample and sampled vocals play solo exactly as performed, melody and tops from the upload only, energy at floor level";
+  const buildO = fw
+    ? `build — ${fw.build}`
+    : "riser climbs, snare roll builds from 8ths to 32nds, hats accelerate, bass pulls back to a sub pulse";
+  const dropO = fw
+    ? `drop — ${fw.drop}`
+    : "maximum drum and bass weight of the track so far, texture opens wide, hook energy peaks, arrangement at full width";
+  const breakO = fw
+    ? `breakdown — ${fw.breakdown}`
+    : "drums out — melody and tops only, FX down-sweep settles, space wide open, energy at floor level, one exposed texture variation";
+  const sigP = fw ? `, signature: ${fw.signature}` : "";
+  if (job === "preserve") {
+    return [
+      `[Session Drummer: ${lane} preserve build, v6 detailed structure${fwName}, ${drums}, spice only]`,
+      `(${LOCK_LINE} — every fill, build, drop, cut, roll and FX move happens in the canvas drums only, sample and sampled vocals untouched throughout)`,
+      `[Instrumental]`,
+      `[Intro]`,
+      `(8 bars: uploaded sample and sampled vocals play exactly as performed, untouched, canvas drums out)`,
+      `(Last 2 bars: canvas reverse swell and an FX sweep rise quietly underneath, impact sets up the verse drop-in, sample and sampled vocals untouched)`,
+      `[Verse 1]`,
+      `(16 bars: canvas drums in only — ${drums}, sample and sampled vocals untouched)`,
+      `(808 support only, spice only, ducking under the kick, no new melodic layers, canvas hi-hat rolls flick at the end of every 4 bars, sample and sampled vocals untouched)`,
+      `(Bar 16: canvas drum fill closes the verse under the sample, sample and sampled vocals untouched)`,
+      `[Build-Up]`,
+      `(Last 4 bars into the chorus: ${buildP}, sample and sampled vocals untouched)`,
+      `(Final bar: canvas cuts for one beat under the sample — stop-time silence — then the drop, sample and sampled vocals untouched)`,
+      `[Chorus 1]`,
+      `(8 bars: drop on bar 1 — ${dropP}, sample and sampled vocals untouched)`,
+      `(Bar 8: canvas stop-time cut — drums stop dead on the last hit, the sample carries one beat of air alone, untouched)`,
+      `[Post-Chorus Drop]`,
+      `(4 bars: heavy canvas drop — 808 and kick carry it, canvas drums switch half-time under the sample, impact on bar 1, sample and sampled vocals untouched)`,
+      `(Last bar: canvas down-sweep and a short snare roll set up the next verse drop-in, sample and sampled vocals untouched)`,
+      `[Verse 2]`,
+      `(16 bars: canvas drums simplify, pocket clears for the sample, 808 drops to sparse hits, sample and sampled vocals untouched)`,
+      `(Bars 9–10: full canvas drop-out — uploaded sample and sampled vocals play solo exactly as performed, canvas drops back in on the one with an impact hit)`,
+      `(Bar 16: canvas hi-hat roll crescendo and a drum fill close the verse, sample and sampled vocals untouched)`,
+      `[Build-Up 2]`,
+      `(Last 4 bars: canvas riser and reverse swell stack, snare roll rises higher than the first build, hats double-time, sample and sampled vocals untouched)`,
+      `[Chorus 2]`,
+      `(8 bars: full canvas energy returns under the sample, extra canvas tops join, arrangement at full width, sample and sampled vocals untouched)`,
+      `(Bar 8: canvas drum fill at peak weight, FX sweep throws the track into the next verse, sample and sampled vocals untouched)`,
+      `[Verse 3]`,
+      `(16 bars: canvas drums stripped for the first 4 bars, then full spice weight — ${drums}, sample and sampled vocals untouched)`,
+      `(Canvas fills answer every 4 bars under the sample, hat rolls at the phrase ends, no new melodic layers, sample and sampled vocals untouched)`,
+      `(Bar 16: biggest canvas fill of the track, then all canvas drops away, sample and sampled vocals untouched)`,
+      `[Breakdown]`,
+      `(8 bars: all canvas drums out — ${breakP})`,
+      `(Last 2 bars: canvas riser starts climbing quietly under the solo, one reverse swell, sample and sampled vocals untouched)`,
+      `[Final Build-Up]`,
+      `(4 bars: canvas riser, snare roll and hi-hat rolls stack and climb under the sample, sub pulse underneath, tension at maximum, sample and sampled vocals untouched)`,
+      `(Last beat: canvas cuts — one beat of silence — then the final drop, sample and sampled vocals untouched)`,
+      `[Chorus 3 — Final]`,
+      `(8 bars: heaviest canvas drop of the track lands on bar 1 under the sample, full drum and 808 weight, sample and sampled vocals ride unchanged over the top, untouched)`,
+      `(Bars 5–8: canvas drums switch half-time under the hook, fills at peak, sample and sampled vocals untouched)`,
+      `[Final Drop]`,
+      `(4 bars: last heavy canvas 808 drop under the sample, half-time weight, then the canvas strips back layer by layer, sample and sampled vocals untouched)`,
+      `[Outro]`,
+      `(8 bars: canvas drums and 808 strip out one layer at a time, FX sweep fades the canvas tops, canvas tape-stop winds the last drum hit down, sample and sampled vocals untouched)`,
+      `(Uploaded sample and sampled vocals play out alone, exactly as performed, to a clean finish)`,
+      `[End]`,
+    ].join("\n");
+  }
+  return [
+    `[Session Drummer: ${lane}, v6 detailed structure${fwName}, ${drums}${sigP}]`,
+    `[Instrumental]`,
+    `[Intro]`,
+    `(8 bars: core motif establishes the track — melody and tops only, drums out, top percussion ticks over the motif, space wide open, energy low)`,
+    `(Last 2 bars: reverse swell and an FX sweep rise under the motif, impact hit lands the drop-in to the verse)`,
+    `[Verse 1]`,
+    `(16 bars: full drums drop in on bar 1 — ${drums})`,
+    `(Bass led, arrangement pushes forward, motif leads, hi-hat rolls flick at the end of every 4 bars)`,
+    `(Bar 16: drum fill closes the verse — snare and tom fill runs straight into the build)`,
+    `[Build-Up]`,
+    `(Last 4 bars into the chorus: ${buildO})`,
+    `(Final bar: everything cuts for one beat — stop-time silence — then the drop)`,
+    `[Chorus 1]`,
+    `(8 bars: drop lands on bar 1 — ${dropO})`,
+    `(Bar 8: stop-time cut — the full band stops dead on the last hit, one beat of dead air, impact throws it into the drop)`,
+    `[Post-Chorus Drop]`,
+    `(4 bars: heavy drop — 808 and kick carry it, drums switch half-time, melody drops out, tops keep the pulse, impact on bar 1)`,
+    `(Last bar: down-sweep FX and a short snare roll set up the verse drop-in)`,
+    `[Verse 2]`,
+    `(16 bars: drums return simplified for the first 8 bars — pocket opens, one new percussion variation only, bass groove varies, motif still leads)`,
+    `(Bars 9–10: full beat drop-out — melody and tops only carry the track, then the drums drop back in on the one with an impact hit)`,
+    `(Bar 16: hi-hat roll crescendo and a drum fill close the verse into the build)`,
+    `[Build-Up 2]`,
+    `(Last 4 bars: riser and reverse swell stack, snare roll rises higher than the first build, hats double-time, tension peaks)`,
+    `[Chorus 2]`,
+    `(8 bars: drop on bar 1 — full energy return, counter-melody and extra tops join, arrangement at full width, bigger than the first chorus)`,
+    `(Bar 8: drum fill at peak weight, FX sweep throws the track into the final verse)`,
+    `[Verse 3]`,
+    `(16 bars: drums stripped back for the first 4 bars, then full weight returns — ${drums})`,
+    `(Final verse pushes hardest: fills answer every 4 bars, hat rolls at the phrase ends, bass groove varies under the motif)`,
+    `(Bar 16: biggest drum fill of the track, then everything drops away)`,
+    `[Breakdown]`,
+    `(8 bars: ${breakO})`,
+    `(Last 2 bars: tape-stop drag on the motif tail, a beat of silence, then a lone riser starts climbing)`,
+    `[Final Build-Up]`,
+    `(4 bars: riser, snare roll and hi-hat rolls stack and climb, sub pulse underneath, tension at maximum)`,
+    `(Last beat: full cut — one beat of silence — before the final drop)`,
+    `[Chorus 3 — Final]`,
+    `(8 bars: the heaviest drop of the track lands on bar 1 — full drums, full bass, full width, final chorus lift)`,
+    `(Bars 5–8: drums switch half-time under the hook for the victory lap, fills at peak)`,
+    `[Final Drop]`,
+    `(4 bars: last heavy 808 drop, half-time weight, tops and FX tails ride over it, then the layers start stripping back)`,
+    `[Outro]`,
+    `(8 bars: drums and bass strip out one layer at a time, FX sweep fades the tops, core motif plays out alone)`,
+    `(Last bar: tape stop winds the final hit down to a clean finish)`,
+    `[End]`,
+  ].join("\n");
+}
+
+

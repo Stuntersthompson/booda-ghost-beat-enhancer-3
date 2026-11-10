@@ -1,0 +1,592 @@
+{
+ "source": "Pasted production reference docs, 2026-10-27 (unverified as facts; prompts are creative steering text)",
+ "sections": [
+  {
+   "section": "1. Breakbeat & Sample-Driven Foundations",
+   "styles": [
+    {
+     "name": "Old School Hip Hop (1970s–1980s)",
+     "original": "Old School Hip Hop (1970s–1980s) instrumental, funk/disco breakbeat sampling, live DJ scratching and turntablism techniques, and simple, loop-based drum programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dusty swung drums, warm sub support, vinyl hiss texture, old school hip hop pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Boom Bap (1980s–1990s)",
+     "original": "Boom Bap (1980s–1990s) instrumental, hard-hitting kick-and-snare patterns, jazz/soul vinyl sampling via MPC-style chopping, and dusty, swung drum breaks.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dusty swung drums, warm sub support, vinyl hiss texture, boom bap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Jazz Rap",
+     "original": "Jazz Rap instrumental, bebop-influenced chord samples, live or sampled double-bass loops, swung drum patterns, and abstract, improvisational jazz structures.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add swung live-pocket drums, warm sub support, vinyl tone texture, jazz rap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Jazzhop / Nu Jazz Hip Hop",
+     "original": "Jazzhop / Nu Jazz Hip Hop instrumental, swung, laid-back drum programming, smooth chord progressions.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add swung live-pocket drums, warm sub support, vinyl tone texture, jazzhop / nu jazz hip pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "East Coast Sample-Boom (Modern Revival)",
+     "original": "East Coast Sample-Boom (Modern Revival) instrumental, modern boom-bap with higher-fidelity mixing, layered vinyl sample chops, subtle modern 808 sub-bass reinforcement.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dusty swung drums, warm sub support, vinyl hiss texture, east coast sample-boom pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Boombap Revival / Lo-Fi Boom Bap",
+     "original": "Boombap Revival / Lo-Fi Boom Bap instrumental, dusty vinyl textures, swung drum breaks, warm analog-style sample processing.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dusty swung drums, warm sub support, vinyl hiss texture, boombap revival / pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Boom Trap (Boom Bap-Trap Hybrid)",
+     "original": "Boom Trap (Boom Bap-Trap Hybrid) instrumental, Classic swung drum breaks and vinyl sample chopping with modern 808 sub-bass and trap-style hi-hat subdivisions.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dusty swung drums, warm sub support, vinyl hiss texture, boom trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Boom Bap Jazz Fusion (Modern Revival)",
+     "original": "Boom Bap Jazz Fusion (Modern Revival) instrumental, Live jazz instrumentation and swung drum breaks with crisper mixing and subtle 808 reinforcement.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add swung live-pocket drums, warm sub support, vinyl tone texture, boom bap jazz fusion pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Boom Bap Drill Hybrid",
+     "original": "Boom Bap Drill Hybrid instrumental, swung, minor-key melodies.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dusty swung drums, warm sub support, vinyl hiss texture, boom bap drill hybrid pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Afrobeat-Boom Bap Fusion",
+     "original": "Afrobeat-Boom Bap Fusion instrumental, Traditional Afrobeat polyrhythmic percussion and horn samples with classic boom-bap drum programming and vinyl-style sample chopping.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add West African percussion support, rolling 808, shaker texture, afrobeat-boom bap fusion pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "2. Trap & 808-Driven Core",
+   "styles": [
+    {
+     "name": "Trap",
+     "original": "Trap instrumental, fast hi-hat rolls (1/32 note triplets), heavy rolling TR-808 sub-bass, syncopated kicks, crisp layered snares/claps on the 3.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Dark Trap",
+     "original": "Dark Trap instrumental, minor-key synth/piano melodies, heavy distorted 808 sub-bass, sparse atmospheric arrangement emphasizing tension.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, dark trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Ambient Trap",
+     "original": "Ambient Trap instrumental, expansive, cinematic synth pads and drone textures with minimal, slow-paced trap drum programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, ambient trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Minimal Trap",
+     "original": "Minimal Trap instrumental, sparse.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, minimal trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Synth Trap",
+     "original": "Synth Trap instrumental, lush.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, synth trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Spacey Trap / Cosmic Trap",
+     "original": "Spacey Trap / Cosmic Trap instrumental, expansive.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, spacey trap / cosmic trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Atlanta Hi-Hat Trap (Modern Mainstream Trap)",
+     "original": "Atlanta Hi-Hat Trap (Modern Mainstream Trap) instrumental, intricate, rapid hi-hat roll programming, clean punchy 808 tuning, polished radio-ready mixing.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, atlanta hi-hat trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Dirty South (Production Style)",
+     "original": "Dirty South (Production Style) instrumental, heavy, booming bass, slow-to-mid tempo drum programming, synth-driven melodic hooks.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, dirty south pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Trap Metal",
+     "original": "Trap Metal instrumental, distorted.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, trap metal pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Sample Drill (UK Drill Variant)",
+     "original": "Sample Drill (UK Drill Variant) instrumental, Interpolated or chopped melodic samples layered over sliding 808 bass.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard trap drums, rapid hat rolls, rolling tuned 808, sample drill pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "3. Drill Family & Regional Trap/Drill Variants",
+   "styles": [
+    {
+     "name": "Drill (Chicago)",
+     "original": "Drill (Chicago) instrumental, sliding, pitch-bent 808 basslines, syncopated triplet-swing hi-hats, sparse dark piano/string melodies.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated drums, sliding 808 glides, crisp claps, drill pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "UK Drill",
+     "original": "UK Drill instrumental, sliding, glide-heavy 808 basslines, dark minor-key piano/string loops, tighter syncopated hi-hats at ~140 BPM.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated drums, sliding 808 glides, crisp claps, uk drill pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Brooklyn Drill",
+     "original": "Brooklyn Drill instrumental, sliding 808 template with sample-driven melodic loops, punchy drum layering, brighter melodic low end.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated drums, sliding 808 glides, crisp claps, brooklyn drill pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "New York Drill (Sample-Driven Variant)",
+     "original": "New York Drill (Sample-Driven Variant) instrumental, heavier interpolated melodic samples, sliding 808 bass, punchy syncopated snare placement.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated drums, sliding 808 glides, crisp claps, new york drill pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Lo-Fi Drill",
+     "original": "Lo-Fi Drill instrumental, warm, dusty.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated drums, sliding 808 glides, crisp claps, lo-fi drill pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Afro-Drill",
+     "original": "Afro-Drill instrumental, Sliding 808 bass and dark melodic sensibility with Afrobeats-style log-drum percussion.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated percussion, log-drum low-end support, afro-drill pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Industrial Drill",
+     "original": "Industrial Drill instrumental, Sliding 808 bass and dark minor-key melodies with abrasive noise textures and distorted sound design.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated drums, sliding 808 glides, crisp claps, industrial drill pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Horror Trap (Trap-Horrorcore Hybrid)",
+     "original": "Horror Trap (Trap-Horrorcore Hybrid) instrumental, trap's hi-hat/808 structure with horrorcore's dissonant, gothic sample textures.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add lo-fi drums, distorted 808, dark reverb texture, horror trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Detroit Rap / Motor City Trap",
+     "original": "Detroit Rap / Motor City Trap instrumental, dark, haunting minor-key piano loops, frantic off-beat hi-hat/snare cadences, distinctively crisp clap samples over sparse 808s.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add frantic off-beat drums, crisp claps, sparse 808 hits, detroit rap / motor city trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Original South African Hip Hop (Kwaito / SA Hip Hop)",
+     "original": "Original South African Hip Hop (Kwaito / SA Hip Hop) instrumental, Traditional kwaito rhythms and deep house-style basslines with localized trap hi-hats and boom-bap drum breaks.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add house-pocket drums, deep bass support, boom bap break texture, original south african pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Latin Trap",
+     "original": "Latin Trap instrumental, Standard trap hi-hat rolls and heavy 808 bass with reggaeton-adjacent dembow rhythmic syncopation and bright melodic loops.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dembow-syncopated drums, heavy 808 support, crisp hats, latin trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Afro-Trap",
+     "original": "Afro-Trap instrumental, West African rhythmic percussion and melodic motifs with Western trap-style hi-hat rolls and 808 bass.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add West African percussion support, rolling 808, shaker texture, afro-trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Trapeton (Reggaeton-Trap Fusion)",
+     "original": "Trapeton (Reggaeton-Trap Fusion) instrumental, Signature dembow rhythmic pattern with trap-style 808 bass/hi-hat rolls and bright melodic/vocal-chop hooks.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dembow-syncopated drums, heavy 808 support, crisp hats, trapeton pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "4. Atmospheric, Melodic & Emotional Styles",
+   "styles": [
+    {
+     "name": "Cloud Rap",
+     "original": "Cloud Rap instrumental, reverb-drenched, atmospheric synth pads, ambient textures, minimal spacious drum programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add soft trap drums, rolling 808, wide reverb texture, cloud rap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Cloud Trap (Cloud Rap-Trap Hybrid)",
+     "original": "Cloud Trap (Cloud Rap-Trap Hybrid) instrumental, Reverb-drenched atmospheric synths with trap's structured 808 bass and hi-hat programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add soft trap drums, rolling 808, wide reverb texture, cloud trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Trap Soul",
+     "original": "Trap Soul instrumental, jazz/R&B-influenced chord loops (Rhodes, warm pads), crisp trap hi-hats, rolling 808 bass, slow late-night tempo.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add soft trap drums, rolling 808, wide reverb texture, trap soul pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Southern Trap Soul Revival",
+     "original": "Southern Trap Soul Revival instrumental, atmospheric R&B chords with heavier, distorted 808 bass and crisper hi-hat programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add soft trap drums, rolling 808, wide reverb texture, southern trap soul revival pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Sad Boy / Melodic Trap",
+     "original": "Sad Boy / Melodic Trap instrumental, melancholic minor-key piano/guitar loops, heavy reverb-drenched synths, slower emotionally weighted drum programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add soft trap drums, rolling 808, wide reverb texture, sad boy / melodic trap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Emo Rap",
+     "original": "Emo Rap instrumental, distorted or clean electric guitar loops, melancholic piano/synth melodies, trap-influenced drum programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add soft trap drums, rolling 808, wide reverb texture, emo rap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Plugg / PluggnB",
+     "original": "Plugg / PluggnB instrumental, dense sound selection, bright synth plucks, smooth melodies, unique chord progressions.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add soft trap drums, rolling 808, wide reverb texture, plugg / pluggnb pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Pluggnb Soul (Plugg-R&B Hybrid)",
+     "original": "Pluggnb Soul (Plugg-R&B Hybrid) instrumental, bright plugg-style synth plucks with smooth, soulful chord progressions and slower R&B-influenced drums.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add soft trap drums, rolling 808, wide reverb texture, pluggnb soul pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Chillhop / Study Beats",
+     "original": "Chillhop / Study Beats instrumental, mellow jazz/soul chord loops, soft brushed drum programming, warm understated bass lines.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add brushed soft drums, warm sub support, vinyl crackle texture, chillhop / study beats pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Drumless / Instrumental Lo-Fi Hip Hop",
+     "original": "Drumless / Instrumental Lo-Fi Hip Hop instrumental, minimal or no percussion, warm jazzy chord loops, vinyl crackle textures, relaxed beat programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add brushed soft drums, warm sub support, vinyl crackle texture, drumless / instrumental pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "5. High-Energy, Distorted & Experimental",
+   "styles": [
+    {
+     "name": "Rage",
+     "original": "Rage instrumental, distorted, saturated EDM-style supersaw synth leads, hard-clipped 808s, aggressive hi-hat rolls.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, rage pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Rage Beat / Hyperpop-Trap Fusion",
+     "original": "Rage Beat / Hyperpop-Trap Fusion instrumental, hyperpop's glossy.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add glitch-edited drums, clipped 808, digital texture, rage beat / pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Industrial / Experimental Hip Hop",
+     "original": "Industrial / Experimental Hip Hop instrumental, abrasive noise textures, distorted synth/sampler manipulation, unconventional structures, foley/glitch effects.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, industrial / experimental pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Experimental Trap / Wave Music",
+     "original": "Experimental Trap / Wave Music instrumental, ambient synth textures, unconventional sound design, trap-influenced drums within loosely structured arrangements.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, experimental trap / wave music pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Witch House-Hip Hop Fusion",
+     "original": "Witch House-Hip Hop Fusion instrumental, dark occult-themed ambient pads, slowed/pitched-down sample chops, trap drums, heavy reverb/delay.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, witch house-hip hop fusion pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Trapwave",
+     "original": "Trapwave instrumental, vaporwave-style slowed.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, trapwave pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Glitch Hop",
+     "original": "Glitch Hop instrumental, hip-hop-influenced drum programming with heavily manipulated, stuttered, bitcrushed sound design, IDM/glitch textures.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, glitch hop pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Digicore",
+     "original": "Digicore instrumental, trap drums blended with glitched audio, chiptune synths, heavily pitch-shifted/processed sample chops.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, digicore pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Tread",
+     "original": "Tread instrumental, ultra-fast 180+ BPM, relentless lo-fi distorted kick/snare programming, minimal aggressive sound design.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, tread pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Deconstructed Club / Experimental Club",
+     "original": "Deconstructed Club / Experimental Club instrumental, fragmented, glitch-heavy percussion, abrasive sound design, unconventional structures.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, deconstructed club / pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Drill & Bass (Breakcore-Hip Hop Fusion)",
+     "original": "Drill & Bass (Breakcore-Hip Hop Fusion) instrumental, Frenetic chopped breakbeat programming with hip-hop-style bass patterns and sample manipulation.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard clipped drums, aggressive hat rolls, saturated 808, drill & bass pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "6. Phonk & Memphis Lineage",
+   "styles": [
+    {
+     "name": "Phonk",
+     "original": "Phonk instrumental, cowbell melodies, heavily distorted/saturated 808s, chopped jazz/soul loops, vinyl-style lo-fi mixing with tape saturation.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add lo-fi drums, distorted 808, tape saturation texture, phonk pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Memphis Rap (Classic)",
+     "original": "Memphis Rap (Classic) instrumental, eerie, low-budget lo-fi production, dark minor-key sample loops, raw unquantized drums.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add lo-fi drums, distorted 808, tape saturation texture, memphis rap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Memphis Horrorcore Revival (Phonk-Horrorcore Hybrid)",
+     "original": "Memphis Horrorcore Revival (Phonk-Horrorcore Hybrid) instrumental, Phonk's cowbell/distorted 808s with horrorcore's dissonant gothic textures.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add lo-fi drums, distorted 808, dark reverb texture, memphis horrorcore revival pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Horrorcore",
+     "original": "Horrorcore instrumental, dissonant minor-key samples, eerie sound design (strings, bells, distorted vocal chops), heavy reverb/delay.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add lo-fi drums, distorted 808, dark reverb texture, horrorcore pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "7. Regional Club & Dance Styles",
+   "styles": [
+    {
+     "name": "Crunk",
+     "original": "Crunk instrumental, heavy 808 bass, aggressive synth riffs and horn stabs, hard-hitting club-ready drum programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add club drums, rolling 808 kicks, chopped rhythm texture, crunk pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Southern Crunk-Trap Hybrid",
+     "original": "Southern Crunk-Trap Hybrid instrumental, Crunk's aggressive synth riffs with trap's refined hi-hat programming and modern 808 tuning.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add club drums, rolling 808 kicks, chopped rhythm texture, southern crunk-trap hybrid pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Hyphy",
+     "original": "Hyphy instrumental, fast, bumpy drum rhythms, energetic synth leads, bouncy basslines.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add club drums, rolling 808 kicks, chopped rhythm texture, hyphy pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "New Orleans Bounce",
+     "original": "New Orleans Bounce instrumental, signature fast breakbeat (\"Triggerman\" beat), heavy call-and-response sample loops, repetitive percussion.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add fast breakbeat drums, shaker percussion, rolling low end, new orleans bounce pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Chopped and Screwed",
+     "original": "Chopped and Screwed instrumental, entire mix drastically slowed, chopped into stuttered segments, layered with echo/delay.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add slowed chopped drum texture, deep 808 support, echo tails, chopped and screwed pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Southern Hip Hop / Screw Music Hybrid",
+     "original": "Southern Hip Hop / Screw Music Hybrid instrumental, Chopped-and-screwed tempo manipulation with heavy 808 bass and syrupy slowed synths.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add slowed chopped drum texture, deep 808 support, echo tails, southern hip hop pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Miami Bass / Ghetto Tech",
+     "original": "Miami Bass / Ghetto Tech instrumental, continuous rolling 808 kick patterns, fast electronic rhythms, bright punchy synth stabs.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add rolling 808 kick drums, fast electronic percussion, miami bass / ghetto tech pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Jersey Club / Philly Goats",
+     "original": "Jersey Club / Philly Goats instrumental, hyper-fast (130-140 BPM), chopped vocal samples as rhythmic elements, triple-kick patterns, \"mattress squeak\" percussion.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add triple-kick club drums, chopped rhythm texture, bouncing low end, jersey club / philly pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Baltimore Club",
+     "original": "Baltimore Club instrumental, fast, chopped vocal samples, rolling kick-drum triplets, ~130 BPM.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add rolling triplet kick drums, chopped rhythm texture, break support, baltimore club pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Chicago Bop",
+     "original": "Chicago Bop instrumental, bright, bouncy 808 bass, upbeat tempo, punchy danceable hi-hat/snare programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add club drums, rolling 808 kicks, chopped rhythm texture, chicago bop pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Atlanta Snap Music",
+     "original": "Atlanta Snap Music instrumental, minimalist slowed-tempo drums, prominent finger-snap percussion, sparse synth-driven hooks.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add minimal drums, finger-snap snare, sparse sine sub, atlanta snap music pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Grime",
+     "original": "Grime instrumental, 140 BPM, fast-paced syncopated electronic garage-style beats, sparse sub-bass stabs, dark minimal synth melodies.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated garage drums, sparse sub stabs, dark texture, grime pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Experimental Grime (Instrumental Grime)",
+     "original": "Experimental Grime (Instrumental Grime) instrumental, dark synth stabs, minimalist arrangement space.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated garage drums, sparse sub stabs, dark texture, experimental grime pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "UK Garage / Hip House Fusion",
+     "original": "UK Garage / Hip House Fusion instrumental, syncopated garage-style shuffled beats, four-on-the-floor or broken-beat kicks, hip-hop-influenced bass.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add club drums, rolling 808 kicks, chopped rhythm texture, uk garage / hip house fusion pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Footwork / Juke-Hip Hop Fusion",
+     "original": "Footwork / Juke-Hip Hop Fusion instrumental, extremely fast (155-160 BPM) chopped sample loops, rapid triplet drum patterns, polyrhythmic percussion.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add rapid triplet drums, polyrhythmic percussion, chopped texture, footwork / juke-hip hop pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "8. Global & Cross-Genre Fusions",
+   "styles": [
+    {
+     "name": "Afrobeats-Hip Hop Fusion",
+     "original": "Afrobeats-Hip Hop Fusion instrumental, log-drum bass patterns, syncopated West African percussion, warm melodic synth/guitar loops over trap-adjacent drums.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated percussion, log-drum low-end support, afrobeats-hip hop fusion pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Amapiano-Hip Hop Fusion",
+     "original": "Amapiano-Hip Hop Fusion instrumental, South African Amapiano's log-drum bass and jazzy piano loops with hip-hop drum programming and vocal-chop arrangements.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated percussion, log-drum low-end support, amapiano-hip hop fusion pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "UK Afroswing",
+     "original": "UK Afroswing instrumental, Afrobeats-style log-drum bass and syncopated percussion with UK garage/grime-adjacent hi-hats and dancehall-influenced hooks.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated percussion, log-drum low-end support, uk afroswing pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Dancehall-Trap Fusion",
+     "original": "Dancehall-Trap Fusion instrumental, Dancehall's riddim-style percussion and syncopated bass with trap-style 808 sub-bass and hi-hat rolls.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated percussion, warm low-end support, live texture, dancehall-trap fusion pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Trap Jazz Fusion (Modern Jazz-Trap Hybrid)",
+     "original": "Trap Jazz Fusion (Modern Jazz-Trap Hybrid) instrumental, Live/sampled jazz instrumentation over contemporary trap-style 808 bass and hi-hat programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add swung live-pocket drums, warm sub support, vinyl tone texture, trap jazz fusion pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Conscious Trap",
+     "original": "Conscious Trap instrumental, trap's hi-hat/808 structure paired with warmer, soulful sample loops and live-instrumentation textures.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add swung live-pocket drums, warm sub support, vinyl tone texture, conscious trap pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "9. Lo-Fi, Chill & Nostalgic Production",
+   "styles": [
+    {
+     "name": "West Coast G-Funk Revival",
+     "original": "West Coast G-Funk Revival instrumental, Classic Moog synth leads and funk bassline samples with contemporary trap-style hi-hats and cleaner mix fidelity.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add laid-back funk drums, warm bass support, analog texture, west coast g-funk revival pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "G-Funk",
+     "original": "G-Funk instrumental, slow, heavy funk-derived basslines, whining Moog synth leads, deep sub-bass.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add laid-back funk drums, warm bass support, analog texture, g-funk pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Boogie / G-Funk Revival Hybrid",
+     "original": "Boogie / G-Funk Revival Hybrid instrumental, Boogie-funk basslines and syncopated guitar riffs with modern trap-adjacent drum programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add laid-back funk drums, warm bass support, analog texture, boogie / g-funk revival hybrid pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "10. Niche & Novelty Production Styles",
+   "styles": [
+    {
+     "name": "Hardcore Hip Hop (Production Style)",
+     "original": "Hardcore Hip Hop (Production Style) instrumental, aggressive.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add hard compressed drums, punchy low end, no-swing pocket, hardcore hip hop pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Nerdcore (Production Style)",
+     "original": "Nerdcore (Production Style) instrumental, chiptune and video-game-inspired synth melodies, sampled 8-bit sound effects, clean straightforward drum programming.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add clean quantized drums, light sub support, chip texture, nerdcore pocket, spice only, sample stays lead."
+    }
+   ]
+  },
+  {
+   "section": "11. Era-Specific Production Techniques",
+   "styles": [
+    {
+     "name": "Early 2000s Ringtone Rap",
+     "original": "Early 2000s Ringtone Rap instrumental, bright, simple four-bar loop structures.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add crisp minimal drums, light sub support, bright texture, early 2000s ringtone rap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Mid-2000s Snap Era (Technical Specifics)",
+     "original": "Mid-2000s Snap Era (Technical Specifics) instrumental, extremely sparse arrangements, slow 70-100 BPM tempos, and stripped-back sub-bass with minimal layering.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add minimal drums, finger-snap snare, sparse sine sub, mid-2000s snap era pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Late 1990s Jiggy Era Production",
+     "original": "Late 1990s Jiggy Era Production instrumental, shiny, polished studio mixing.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add polished boom bap drums, clean sub support, live texture, late 1990s jiggy pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Early 1990s Golden Era Sampling",
+     "original": "Early 1990s Golden Era Sampling instrumental, dense, intentionally lo-fi bit-crushed drum sounds, and heavy swing/quantization imperfection for groove.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add layered break drums, hardware swing, warm sub support, early 1990s golden pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Mid-1990s Mafioso Rap Production",
+     "original": "Mid-1990s Mafioso Rap Production instrumental, cinematic, orchestral sample loops (strings, horns), slow-to-mid tempo boom-bap drum programming, and a darker.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add cinematic boom bap drums, wide sub support, orchestral texture, mid-1990s mafioso rap pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Late 2000s Hipster Rap / Blog Era",
+     "original": "Late 2000s Hipster Rap / Blog Era instrumental, eclectic, unconventional drum programming, and a DIY, blog-distributed lo-fi mixing approach.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add eclectic drums, lo-fi texture, raw low-end support, late 2000s hipster pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Early 2010s EDM-Trap Crossover (Festival Trap)",
+     "original": "Early 2010s EDM-Trap Crossover (Festival Trap) instrumental, massive, detuned saw-wave bass drops, build-up/drop song structures borrowed from EDM, and heavily sidechained.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add big trap drums, sidechained low end, drop-ready texture, early 2010s edm-trap crossover pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Mid-2010s Internet/SoundCloud Era Techniques",
+     "original": "Mid-2010s Internet/SoundCloud Era Techniques instrumental, affordable DAW-based production (FL Studio patterns), freely distributed drum kits and loop packs, pitched-up vocal chop sampling.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add raw trap drums, clipped low end, chopped texture, mid-2010s internet/soundcloud era pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Late 2010s Melodic Rap Era",
+     "original": "Late 2010s Melodic Rap Era instrumental, combined Auto-Tuned melodic sample sources, atmospheric guitar or piano loops, moombahton-influenced half-time drum patterns.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add half-time drums, soft 808 support, wide reverb texture, late 2010s melodic rap era pocket, spice only, sample stays lead."
+    },
+    {
+     "name": "Early 2020s Hyperpop-Adjacent Hip Hop Techniques",
+     "original": "Early 2020s Hyperpop-Adjacent Hip Hop Techniques instrumental, extreme pitch manipulation, glitch-edited drum programming, maximalist layering of synth textures.",
+     "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add glitch-edited drums, clipped 808, digital texture, early 2020s hyperpop-adjacent pocket, spice only, sample stays lead."
+    }
+   ]
+  }
+ ],
+ "technical_moves": [
+  {
+   "name": "SP-1200 grit",
+   "original": "Boom bap instrumental, 12-bit sampler grit, dark rolled-off highs, dusty vinyl chops, swung MPC pocket, warm analog low-pass tone.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dusty swung drums, warm sub support, 12-bit grit texture, spice only, sample stays lead."
+  },
+  {
+   "name": "MPC swing pocket",
+   "original": "Boom bap instrumental, 54 to 62 percent swing on the 16ths, dragging humanized pocket, chopped soul loop, dry snare crack, warm bassline.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add humanized swung drums, warm sub support, dry snare texture, spice only, sample stays lead."
+  },
+  {
+   "name": "Soft-clip 808 translation",
+   "original": "Trap instrumental, soft-clipped 808 harmonics so the sub reads on small speakers, hard kick transient, crisp hats, dark minor loop.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add soft-clipped 808 support, hard drum transients, crisp hats, spice only, sample stays lead."
+  },
+  {
+   "name": "UK late snare",
+   "original": "UK drill instrumental, snare pushed late on the 3.5, skittering syncopated hats, extreme 808 portamento slides, dark minor strings.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add late-snare drill drums, skitter hats, sliding 808 support, spice only, sample stays lead."
+  },
+  {
+   "name": "Log-drum anchor",
+   "original": "Amapiano hip hop instrumental, synthesized log-drum thump as bass and rhythm anchor, jazzy piano loops, syncopated percussion, warm bounce.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add syncopated percussion, log-drum low-end support, spice only, sample stays lead."
+  },
+  {
+   "name": "Jersey 5-kick bounce",
+   "original": "Jersey club rap instrumental, five-kick 4-4-3-3-2 bounce at 135 BPM, chopped vocal rhythm chops, squeak offbeats, heavy club low end.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add five-kick club drums, chopped rhythm texture, bouncing low end, spice only, sample stays lead."
+  },
+  {
+   "name": "Trap soul sidechain pump",
+   "original": "Trap soul instrumental, Rhodes 9th chords sidechained to the kick, slow pumping groove, rolling 808, crisp late-night hats, warm pads.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add sidechained drum pump, rolling 808 support, warm texture, spice only, sample stays lead."
+  },
+  {
+   "name": "TASCAM cassette crush",
+   "original": "Memphis phonk instrumental, 4-track cassette crush, rolled-off highs, blown-out 808, tuned cowbell melody, chopped soul loop, tape hiss.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add cassette-crushed lo-fi drums, saturated 808, tape hiss texture, spice only, sample stays lead."
+  },
+  {
+   "name": "Dembow tresillo",
+   "original": "Latin trap instrumental, 3-3-2 dembow syncopation, heavy rolling 808, bright tropical loop, crisp trap hats, club-ready bounce.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add dembow-syncopated drums, heavy 808 support, spice only, sample stays lead."
+  },
+  {
+   "name": "Detroit rush",
+   "original": "Detroit trap instrumental, hats and claps pushed ahead of the grid, rushed urgent momentum, haunting minor piano loop, sparse 808 hits.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add ahead-of-grid Detroit drums, crisp claps, sparse 808 hits, spice only, sample stays lead."
+  },
+  {
+   "name": "Glitch micro-edits",
+   "original": "Digicore trap instrumental, glitch micro-edited drums, bitcrushed chops, chiptune synth sparkle, pitch-shifted textures, hard trap low end.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add glitch-edited drum fills, bitcrushed texture, hard low-end support, spice only, sample stays lead."
+  },
+  {
+   "name": "Jazz-space boom bap",
+   "original": "Jazz rap instrumental, minor 9th and major 7th chord chops, upright bass loop, swung drums, abstract space between hits, warm vinyl tone.",
+   "preserve": "Preserve the original sample and sampled vocals exactly as performed. Add swung jazz-pocket drums, warm sub support, vinyl tone texture, spice only, sample stays lead."
+  }
+ ]
+}

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 4-Pad Drum Machine / Beat Matrix in Center -->
+    <!-- Pad 1 (Top Left) -->
+    <path
+        android:fillColor="#F5A524"
+        android:pathData="M34,34h17v17h-17z" />
+    <!-- Pad 2 (Top Right) Cyan accent -->
+    <path
+        android:fillColor="#00D2FF"
+        android:pathData="M57,34h17v17h-17z" />
+    <!-- Pad 3 (Bottom Left) -->
+    <path
+        android:fillColor="#E08E10"
+        android:pathData="M34,57h17v17h-17z" />
+    <!-- Pad 4 (Bottom Right) Gold accent -->
+    <path
+        android:fillColor="#FFD166"
+        android:pathData="M57,57h17v17h-17z" />
+
+    <!-- Waveform Overlay traversing center -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M24,54 L36,54 L42,42 L48,66 L54,36 L60,72 L66,46 L72,54 L84,54" />
+
+    <!-- Equalizer LED indicator dots -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M37,28h3v2h-3z M43,28h3v2h-3z M49,28h3v2h-3z M55,28h3v2h-3z M61,28h3v2h-3z M67,28h3v2h-3z" />
+</vector>

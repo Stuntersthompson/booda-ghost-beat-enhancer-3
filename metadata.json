@@ -1,0 +1,6 @@
+{
+  "name": "BooDa Beat Enhancer",
+  "description": "AI Beat Analyst, Suno v6 prompt engineering workstation, DSP audio meter & 41-lane production studio",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
