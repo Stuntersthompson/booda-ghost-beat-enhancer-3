@@ -46,20 +46,30 @@ class FavoriteRepository(private val favoriteDao: FavoritePromptDao) {
   }
 
   suspend fun exportFavoritesJson(favorites: List<FavoritePromptEntity>): String {
-    val jsonArray = JSONArray()
-    for (f in favorites) {
-      val obj = JSONObject().apply {
-        put("id", f.id)
-        put("prompt", f.prompt)
-        put("category", f.category)
-        put("subgenre", f.subgenre)
-        put("bpmHint", f.bpmHint)
-        put("chars", f.chars)
-        put("savedAt", f.savedAt)
+    val envelope = JSONObject().apply {
+      put("app", "BooDa Beat Enhancer")
+      put("kind", "prompt-favorites")
+      put("version", 1)
+      put("exported_at", java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+        timeZone = java.util.TimeZone.getTimeZone("UTC")
+      }.format(java.util.Date()))
+      put("count", favorites.size)
+      val jsonArray = JSONArray()
+      for (f in favorites) {
+        val obj = JSONObject().apply {
+          put("id", f.id)
+          put("prompt", f.prompt)
+          put("category", f.category)
+          put("subgenre", f.subgenre)
+          put("bpmHint", f.bpmHint)
+          put("chars", f.chars)
+          put("savedAt", f.savedAt)
+        }
+        jsonArray.put(obj)
       }
-      jsonArray.put(obj)
+      put("favorites", jsonArray)
     }
-    return jsonArray.toString(2)
+    return envelope.toString(2)
   }
 
   suspend fun exportFavoritesPlainText(favorites: List<FavoritePromptEntity>): String {
@@ -78,20 +88,55 @@ class FavoriteRepository(private val favoriteDao: FavoritePromptDao) {
   suspend fun importFavoritesJson(jsonStr: String): Int {
     var count = 0
     try {
-      val jsonArray = JSONArray(jsonStr)
+      val trimmed = jsonStr.trim()
+      val jsonArray: JSONArray = if (trimmed.startsWith("{")) {
+        val envelope = JSONObject(trimmed)
+        envelope.optJSONArray("favorites") ?: JSONArray()
+      } else if (trimmed.startsWith("[")) {
+        JSONArray(trimmed)
+      } else {
+        return 0
+      }
+
       for (i in 0 until jsonArray.length()) {
-        val obj = jsonArray.getJSONObject(i)
-        val entity = FavoritePromptEntity(
-          id = obj.optLong("id", System.currentTimeMillis() + i),
-          prompt = obj.getString("prompt"),
-          category = obj.optString("category", "Imported"),
-          subgenre = obj.optString("subgenre", "Custom"),
-          bpmHint = obj.optString("bpmHint", ""),
-          chars = obj.optInt("chars", obj.getString("prompt").length),
-          savedAt = obj.optLong("savedAt", System.currentTimeMillis())
-        )
-        favoriteDao.insertFavorite(entity)
-        count++
+        val item = jsonArray.get(i)
+        if (item is JSONObject) {
+          val promptText = item.optString("prompt", "").ifEmpty { item.optString("text", "") }
+          if (promptText.isNotBlank()) {
+            val entity = FavoritePromptEntity(
+              id = item.optLong("id", System.currentTimeMillis() + i),
+              prompt = promptText,
+              category = item.optString("category", "Imported"),
+              subgenre = item.optString("subgenre", "Custom"),
+              bpmHint = item.optString("bpmHint", ""),
+              chars = item.optInt("chars", promptText.length),
+              savedAt = item.optLong("savedAt", System.currentTimeMillis())
+            )
+            favoriteDao.insertFavorite(entity)
+            count++
+          }
+        } else if (item is String && item.isNotBlank()) {
+          // Check if string matches a curated prompt ID or text
+          val curatedMatch = CuratedPrompts.ALL_CURATED.find { 
+            it.id.toString() == item || it.prompt.equals(item, ignoreCase = true) 
+          }
+          if (curatedMatch != null) {
+            insertFavorite(curatedMatch)
+            count++
+          } else {
+            val entity = FavoritePromptEntity(
+              id = System.currentTimeMillis() + i,
+              prompt = item,
+              category = "Imported",
+              subgenre = "Custom",
+              bpmHint = "",
+              chars = item.length,
+              savedAt = System.currentTimeMillis()
+            )
+            favoriteDao.insertFavorite(entity)
+            count++
+          }
+        }
       }
     } catch (e: Exception) {
       e.printStackTrace()

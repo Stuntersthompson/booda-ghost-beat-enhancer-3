@@ -266,5 +266,102 @@ class ExampleRobolectricTest {
     assertEquals(1, importedCount)
     assertTrue(favDao.isFavorite(42L))
   }
+
+  @Test
+  fun testTakesDualExportAndImport() = runBlocking {
+    val takeDao = database.takeDao()
+    val takeRepo = com.example.data.repository.TakeRepository(takeDao)
+
+    val sampleTake = com.example.data.model.TakeEntity(
+      id = 0,
+      name = "Chiraq Drill Take 1",
+      beatTitle = "Southside Heat",
+      lane = "Drill",
+      bpm = 144.0,
+      audioFilePath = null,
+      style = "Preserve the original sample and sampled vocals exactly as performed. Add sliding 808s and drill stutters.",
+      lyrics = "[Intro] (sample solo)\n[Chorus 1] (drop)\n[End]",
+      excludeText = "vocal chops, muddy reverb",
+      settings = "Model v6 · Variety 0 · Weirdness 25 · Style 70 · Audio 80",
+      result = "winner",
+      nextChange = "Slightly shorter 808 glide time",
+      jobType = "preserve",
+      createdAt = System.currentTimeMillis()
+    )
+
+    val newId = takeRepo.insertTake(sampleTake)
+    assertTrue(newId > 0)
+
+    val allTakes = takeRepo.allTakes.first()
+    assertEquals(1, allTakes.size)
+
+    // Test Plain Text Export
+    val plainText = takeRepo.exportTakesPlainText(allTakes)
+    assertTrue(plainText.contains("BOODA BEAT ENHANCER"))
+    assertTrue(plainText.contains("CHIRAQ DRILL TAKE 1"))
+    assertTrue(plainText.contains("[STYLE OF MUSIC]"))
+    assertTrue(plainText.contains("[LYRICS BOX / STRUCTURE MAP]"))
+
+    // Test JSON Export
+    val json = takeRepo.exportTakesJson(allTakes)
+    assertTrue(json.contains("take-package-backup"))
+    assertTrue(json.contains("Chiraq Drill Take 1"))
+
+    // Clear DB
+    takeRepo.deleteTake(newId)
+    val emptyTakes = takeRepo.allTakes.first()
+    assertEquals(0, emptyTakes.size)
+
+    // Test JSON Import
+    val importedCount = takeRepo.importTakesJson(json)
+    assertEquals(1, importedCount)
+
+    val restoredTakes = takeRepo.allTakes.first()
+    assertEquals(1, restoredTakes.size)
+    assertEquals("Chiraq Drill Take 1", restoredTakes[0].name)
+    assertEquals("winner", restoredTakes[0].result)
+  }
+
+  @Test
+  fun testTakesWinRateCalculation() = runBlocking {
+    val takeDao = database.takeDao()
+    val takeRepo = com.example.data.repository.TakeRepository(takeDao)
+
+    // Clean start
+    val initialTakes = takeRepo.allTakes.first()
+    for (t in initialTakes) {
+      takeRepo.deleteTake(t.id)
+    }
+
+    takeRepo.insertTake(com.example.data.model.TakeEntity(id = 0, name = "Take 1", beatTitle = "", lane = "Trap", bpm = 140.0, audioFilePath = null, style = "Style 1", lyrics = "[End]", excludeText = "", settings = "", result = "winner", nextChange = "", jobType = "preserve", createdAt = 1L))
+    takeRepo.insertTake(com.example.data.model.TakeEntity(id = 0, name = "Take 2", beatTitle = "", lane = "Trap", bpm = 140.0, audioFilePath = null, style = "Style 2", lyrics = "[End]", excludeText = "", settings = "", result = "winner", nextChange = "", jobType = "preserve", createdAt = 2L))
+    takeRepo.insertTake(com.example.data.model.TakeEntity(id = 0, name = "Take 3", beatTitle = "", lane = "Trap", bpm = 140.0, audioFilePath = null, style = "Style 3", lyrics = "[End]", excludeText = "", settings = "", result = "miss", nextChange = "", jobType = "preserve", createdAt = 3L))
+
+    val (total, winners) = takeRepo.getStats()
+    assertEquals(3, total)
+    assertEquals(2, winners)
+    val winRate = (winners * 100) / total
+    assertEquals(66, winRate)
+  }
+
+  @Test
+  fun testAll41LanesDrumsAndFrameworkComparison() {
+    val repo = com.example.data.repository.PromptBankRepository(context)
+    repo.ensureLoaded()
+
+    assertEquals(41, repo.allLanes.size)
+    assertEquals(21, repo.verifiedLanes.size)
+    assertEquals(20, repo.expansionLanes.size)
+
+    for (lane in repo.allLanes) {
+      val drums = repo.laneDrums(lane)
+      assertTrue("Lane '$lane' must have non-empty drum description", drums.isNotBlank())
+
+      val map = repo.buildV6LyricsMap(lane, com.example.data.model.JobType.PRESERVE)
+      assertTrue("Lane '$lane' lyrics map must contain lock line", map.contains(com.example.data.model.LOCK_LINE))
+      assertTrue("Lane '$lane' lyrics map must end with [End]", map.trim().endsWith("[End]"))
+      assertTrue("Lane '$lane' lyrics map must be <= 5000 chars", map.length <= 5000)
+    }
+  }
 }
 

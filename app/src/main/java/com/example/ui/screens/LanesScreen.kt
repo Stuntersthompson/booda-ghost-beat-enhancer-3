@@ -77,6 +77,165 @@ fun LanesScreen(viewModel: MainViewModel) {
       }
     }
 
+    // Side-by-Side 2-Lane Comparison Tool Deck
+    item {
+      var showComparisonDeck by remember { mutableStateOf(false) }
+      var laneA by remember { mutableStateOf(activeLane) }
+      var laneB by remember { mutableStateOf(if (activeLane != "Memphis Trap") "Memphis Trap" else "Boom Trap") }
+      var showDropdownA by remember { mutableStateOf(false) }
+      var showDropdownB by remember { mutableStateOf(false) }
+
+      Surface(
+        color = StudioCard,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .border(1.dp, StudioBorder, RoundedCornerShape(12.dp))
+          .testTag("lane_comparison_deck")
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(Icons.Default.Tune, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("SIDE-BY-SIDE LANE COMPARISON", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+            }
+            TextButton(
+              onClick = { showComparisonDeck = !showComparisonDeck },
+              contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+              Text(
+                text = if (showComparisonDeck) "Hide Deck ▲" else "Compare Lanes ▾",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = AmberGold
+              )
+            }
+          }
+
+          if (showComparisonDeck) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              // Lane A Selector
+              Box(modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                  onClick = { showDropdownA = true },
+                  shape = RoundedCornerShape(8.dp),
+                  modifier = Modifier.fillMaxWidth().height(36.dp),
+                  contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                  Text(laneA.take(16), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+                }
+                DropdownMenu(expanded = showDropdownA, onDismissRequest = { showDropdownA = false }) {
+                  allLanes.forEach { l ->
+                    DropdownMenuItem(text = { Text(l) }, onClick = { laneA = l; showDropdownA = false })
+                  }
+                }
+              }
+
+              // Lane B Selector
+              Box(modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                  onClick = { showDropdownB = true },
+                  shape = RoundedCornerShape(8.dp),
+                  modifier = Modifier.fillMaxWidth().height(36.dp),
+                  contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                  Text(laneB.take(16), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+                }
+                DropdownMenu(expanded = showDropdownB, onDismissRequest = { showDropdownB = false }) {
+                  allLanes.forEach { l ->
+                    DropdownMenuItem(text = { Text(l) }, onClick = { laneB = l; showDropdownB = false })
+                  }
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Two Cards
+            val fwA = viewModel.bankRepo.frameworks[laneA]
+            val fwB = viewModel.bankRepo.frameworks[laneB]
+            val drumsA = viewModel.bankRepo.laneDrums(laneA)
+            val drumsB = viewModel.bankRepo.laneDrums(laneB)
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              // Deck Lane A
+              Surface(
+                color = StudioCardElevated,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.weight(1f).border(0.5.dp, StudioBorder, RoundedCornerShape(8.dp))
+              ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                  Text(laneA, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+                  Spacer(modifier = Modifier.height(4.dp))
+                  Text("Drums: $drumsA", style = MaterialTheme.typography.labelSmall, color = TextPrimary)
+                  if (fwA != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Build: ${fwA.build}", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text("Drop: ${fwA.drop}", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text("Sig: ${fwA.signature}", style = MaterialTheme.typography.labelSmall, color = AmberGoldLight)
+                  }
+                  Spacer(modifier = Modifier.height(8.dp))
+                  Button(
+                    onClick = { viewModel.setLane(laneA) },
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.fillMaxWidth().height(28.dp)
+                  ) {
+                    Text("Use $laneA", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = Color.Black)
+                  }
+                }
+              }
+
+              // Deck Lane B
+              Surface(
+                color = StudioCardElevated,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.weight(1f).border(0.5.dp, StudioBorder, RoundedCornerShape(8.dp))
+              ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                  Text(laneB, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+                  Spacer(modifier = Modifier.height(4.dp))
+                  Text("Drums: $drumsB", style = MaterialTheme.typography.labelSmall, color = TextPrimary)
+                  if (fwB != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Build: ${fwB.build}", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text("Drop: ${fwB.drop}", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text("Sig: ${fwB.signature}", style = MaterialTheme.typography.labelSmall, color = StudioCyan)
+                  }
+                  Spacer(modifier = Modifier.height(8.dp))
+                  Button(
+                    onClick = { viewModel.setLane(laneB) },
+                    colors = ButtonDefaults.buttonColors(containerColor = StudioCyan),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.fillMaxWidth().height(28.dp)
+                  ) {
+                    Text("Use $laneB", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = Color.Black)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Lane Cards
     items(filteredLanes) { lane ->
       val isSelected = lane == activeLane

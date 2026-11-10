@@ -94,6 +94,93 @@ fun TakesScreen(viewModel: MainViewModel) {
       }
     }
 
+    // Dual Export & Logbook Tools
+    item {
+      var showImportModal by remember { mutableStateOf(false) }
+      var importJsonInput by remember { mutableStateOf("") }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        OutlinedButton(
+          onClick = { viewModel.exportTakes(context, asJson = false) },
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = AmberGold),
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+          modifier = Modifier.weight(1f).height(38.dp).testTag("action_export_takes_text")
+        ) {
+          Icon(Icons.Default.Article, contentDescription = null, tint = AmberGold, modifier = Modifier.size(14.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Export Text", style = MaterialTheme.typography.labelSmall, color = AmberGold)
+        }
+
+        OutlinedButton(
+          onClick = { viewModel.exportTakes(context, asJson = true) },
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = StudioCyan),
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+          modifier = Modifier.weight(1f).height(38.dp).testTag("action_export_takes_json")
+        ) {
+          Icon(Icons.Default.Code, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(14.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Export JSON", style = MaterialTheme.typography.labelSmall, color = StudioCyan)
+        }
+
+        Button(
+          onClick = { showImportModal = true },
+          colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+          modifier = Modifier.weight(0.9f).height(38.dp).testTag("action_import_takes")
+        ) {
+          Icon(Icons.Default.FileDownload, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Import", style = MaterialTheme.typography.labelSmall, color = TextPrimary)
+        }
+      }
+
+      if (showImportModal) {
+        AlertDialog(
+          onDismissRequest = { showImportModal = false },
+          title = { Text("Import Takes to Logbook", color = TextPrimary) },
+          text = {
+            Column {
+              Text("Paste JSON takes backup below. Existing takes are safely preserved (merge-only import):", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+              Spacer(modifier = Modifier.height(8.dp))
+              OutlinedTextField(
+                value = importJsonInput,
+                onValueChange = { importJsonInput = it },
+                placeholder = { Text("Paste JSON array or envelope here...") },
+                modifier = Modifier.fillMaxWidth().height(140.dp),
+                textStyle = MonospacePrompt.copy(fontSize = 11.sp, color = TextPrimary)
+              )
+            }
+          },
+          confirmButton = {
+            Button(
+              onClick = {
+                if (importJsonInput.isNotBlank()) {
+                  viewModel.importTakes(context, importJsonInput)
+                  importJsonInput = ""
+                }
+                showImportModal = false
+              },
+              colors = ButtonDefaults.buttonColors(containerColor = StudioCyan)
+            ) {
+              Text("Import", color = Color.Black)
+            }
+          },
+          dismissButton = {
+            TextButton(onClick = { showImportModal = false }) {
+              Text("Cancel", color = TextSecondary)
+            }
+          },
+          containerColor = StudioCardElevated
+        )
+      }
+    }
+
     // Filter Chips
     item {
       val filterOptions = listOf("ALL", "WINNER", "PENDING", "MISS")
@@ -155,7 +242,20 @@ fun TakesScreen(viewModel: MainViewModel) {
         onDuplicate = { viewModel.duplicateTake(take.id) },
         onDelete = { viewModel.deleteTake(take.id) },
         onCopy = {
-          val bundle = "Take: ${take.name}\nLane: ${take.lane}\nSettings: ${take.settings}\n\nStyle:\n${take.style}\n\nLyrics:\n${take.lyrics}"
+          val bundle = """=== TAKE: ${take.name.uppercase()} ===
+Beat: ${if (take.beatTitle.isNotBlank()) take.beatTitle else take.name}
+Lane: ${take.lane} | Job: ${take.jobType.uppercase()} | BPM: ${if (take.bpm > 0) take.bpm.toInt().toString() else "N/A"}
+Status: ${take.result.uppercase()} | Settings: ${take.settings}
+${if (take.nextChange.isNotBlank()) "Next Change: ${take.nextChange}\n" else ""}
+--- STYLE OF MUSIC ---
+${take.style}
+
+--- EXCLUDE STYLES ---
+${take.excludeText}
+
+--- LYRICS BOX MAP ---
+${take.lyrics}
+=================================""".trimIndent()
           viewModel.copyToClipboard(context, "Take ${take.name}", bundle)
         }
       )
@@ -174,6 +274,10 @@ private fun TakeItemCard(
 ) {
   var editingNote by remember { mutableStateOf(false) }
   var noteInput by remember { mutableStateOf(take.nextChange) }
+
+  LaunchedEffect(take.nextChange) {
+    noteInput = take.nextChange
+  }
 
   val resultColor = when (take.result.lowercase()) {
     "winner" -> StudioWinner
@@ -259,7 +363,7 @@ private fun TakeItemCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
           OutlinedTextField(
             value = noteInput,
-            onValueChange = { noteInput = it },
+            onValueChange = { if (it.length <= 1000) noteInput = it },
             placeholder = { Text("What to change on next take...") },
             modifier = Modifier.weight(1f),
             singleLine = true

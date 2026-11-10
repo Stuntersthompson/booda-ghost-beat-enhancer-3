@@ -1,137 +1,103 @@
-# BooDa Beat Enhancer — Style Generator Expansion & Quality Hardening Plan
+# Implementation Plan: Comprehensive App Audit, Stabilization & Two-Pass Enhancement
 
-Comprehensive plan to implement the searchable filter bar, Room-persisted favorites system with zero data loss migration, keyword highlighting, prompt sharing, and an exhaustive diagnostic audit with automated verification.
+This plan outlines the stabilization and systematic upgrade across all seven tabs of the BooDa Beat Enhancer Android app (**Analyze**, **Styles/Style Generator**, **Library**, **Build**, **Simple**, **Takes**, and **Advisor**).
 
-## User Review & Critical Decisions
+---
+
+## User Review Required
 
 > [!IMPORTANT]
-> - **Room Migration (v2 → v3)**: Existing `takes` table data is preserved with an explicit `Migration(2, 3)` creating the `favorite_prompts` table, removing `fallbackToDestructiveMigration()`.
-> - **Search Filter AND Logic**: Multi-word search terms (e.g., "808 hats") require all tokens to match across prompt text, category, or subgenre/tags in any order.
-> - **Suno v6 Length Limit Guard**: All 150+ curated prompts are enforced ≤ 200 characters with an automated unit test.
-> - **Single Source of Truth**: Room DAO exposes `Flow<List<FavoritePromptEntity>>` and `Flow<Set<Long>>`, ensuring instant reactive heart sync across all chips, search queries, and views.
+> - **Room Migration & Data Preservation**: The existing Room database schema (v1 → v2 → v3) preserves all existing `Take` records and `FavoritePrompt` items without destructive fallback (`fallbackToDestructiveMigration()` is completely removed).
+> - **Dual Export Strategy**: As selected, Takes and Favorites will support both structured Suno text/markdown and cross-platform envelope JSON (`{ "app": "BooDa Beat Enhancer", "kind": "...", ... }`).
+> - **Zero Placeholder Policy**: All features, checklists, analytics, and prompts will be implemented as production-grade Kotlin and Jetpack Compose code with no mock stubs.
 
 ---
 
-## 1. Overview & Core Concept
+## Proposed Changes
 
-- **What It Delivers**: 
-  1. A persistent, debounced, case-insensitive multi-word search bar in the **Style Generator** tab with term highlighting and live result counters.
-  2. A persistent **Room Favorites System** with animated heart toggles, haptics, snackbar with undo, and favorites export/import.
-  3. A robust **v2 → v3 Room migration** ensuring zero data loss for existing Take records.
-  4. An **Exhaustive Diagnostic Audit** fixing lifecycle leaks, audio buffer edge cases, and Gemini timeout handling.
-  5. Enhanced prompt actions including system share sheet and recent prompts history.
+### Phase 1: Stabilization & Root-Cause Defect Resolution
 
----
+Audit every tab for potential edge cases, state loss, or regressions, resolving each at its root cause:
 
-## 2. User Experience & Visual Design
+1. **`AnalyzeScreen.kt` & `AudioAnalyzer.kt`**:
+   - Add BPM half/double adjustment controls under measurement cards (`feels half: N BPM` / `feels double: N BPM`) to correct octave-doubling or halving on busy hi-hats.
+   - Implement the Sample Vocal Honesty Law: mark transcribed sample words as `"Heard clearly"` or `"Fragment only"` up to 120 chars, defaulting to explicit `"No words made out"` if undetected rather than hallucinating lyrics.
+   - Ensure clean resource release in `AudioRecorder` and `AudioAnalyzer` to avoid memory or mic lockups.
 
-### Key User Flows
-1. **Searching & Filtering**:
-   - User opens the **Style Generator** tab.
-   - Types queries like `"808 hats"`, `"gospel soul"`, or `"drill"`.
-   - The list updates in real-time with a ~250ms debounce. Matched words are highlighted in Amber Gold against the dark prompt background.
-   - The result counter dynamically displays `"14 of 150 prompts"`.
-   - Tapping the clear button `(X)` clears the search text and keeps the active category chip intact.
-   - If no prompts match, a styled empty state appears with a `"Clear filters"` button.
+2. **`BuildScreen.kt`**:
+   - Fix expansion lane lyrics fallback: ensure that any lane without a static bank template defaults smoothly to its `v6 detailed structure` (preventing blank lyrics maps).
+   - Enforce input character length caps: 120 chars on take name, 1,000 on next change notes.
+   - Ensure `assembleStyle` warns visibly if user text pushes prompt past the 1,000-character cap instead of silently truncating.
 
-2. **Favoriting & Managing Prompts**:
-   - Every prompt card features an animated Heart button (`Icons.Default.Favorite` vs `Icons.Default.FavoriteBorder`).
-   - Tapping toggles the heart with a bounce animation and tactile haptic feedback.
-   - A Snackbar appears confirming `"Added to Favorites"` or `"Removed from Favorites"` with an `"Undo"` action.
-   - Switching to the **Favorites** chip shows only saved prompts with an item count badge (e.g., `Favorites (8)`).
-   - If no favorites exist yet, an empty state guides the user: *"Tap the heart on any prompt to save it here."*
-
-3. **Prompt Actions**:
-   - **Copy**: One-tap copy with animated checkmark and toast confirmation.
-   - **Share**: System Android Sharesheet to send style prompts to Notes, messaging, or Suno web.
-   - **Send to Build**: Immediately stages the 200-char style prompt into the 3-Box Suno studio.
-
-### Design System & Tokens
-- **Theme**: Obsidian Dark Console (`StudioBg = #0A0C10`, `StudioCard = #12151D`, `StudioCardElevated = #1A1F2B`).
-- **Accents**: Amber Gold (`#F5A524`) for primary beats/favorites, Studio Cyan (`#00D2FF`) for DSP/metrics, Studio Miss (`#EF4444`) for clipping/removal.
-- **Accessibility**: All buttons and icon targets strictly sized to minimum 48dp x 48dp with semantic `contentDescription`.
+3. **`TakesScreen.kt` & `SimpleScreen.kt`**:
+   - Fix take card edit inputs to stay synchronized with underlying reactive database flows.
+   - Prevent out-of-range indices in Simple prompt assembler style pickers.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+### Phase 2: Enhancement Pass 1 (Quick-Handoff & Build Assembly)
 
-- **Decision 1: Explicit Room Migration vs Destructive Fallback**:
-  - *Chosen Approach*: Implement `MIGRATION_2_3` creating `favorite_prompts` table with `id` (Long primary key), `prompt` (TEXT), `category` (TEXT), `subgenre` (TEXT), `bpmHint` (TEXT), and `savedAt` (INTEGER NOT NULL). Remove `fallbackToDestructiveMigration()`.
-  - *Why*: User data in the Take Logbook must never be wiped across updates.
-- **Decision 2: In-Memory Search Debounce + Highlighted Text Rendering**:
-  - *Chosen Approach*: StateFlow debounce (250ms) driving `remember(query, category, favorites)` with `buildAnnotatedString` applying `SpanStyle(background = AmberGold.copy(alpha = 0.25f), color = AmberGold)` to matching substrings.
-  - *Why*: Delivers 60 FPS scrolling while giving instant visual feedback on why a prompt matched.
-- **Decision 3: Conflict Strategy REPLACE for Favorites**:
-  - *Chosen Approach*: `OnConflictStrategy.REPLACE` in `FavoritePromptDao`.
-  - *Why*: Eliminates primary key collisions or duplicate database rows on rapid double taps.
+Deliver high-impact production features requested in the clarifying interview:
 
----
+1. **Suno Handoff Checklist (`BuildScreen.kt`)**:
+   - A dedicated 5-step checklist in Suno's exact interface order:
+     1. Route selection (`Extend` with Audio Influence 75–85)
+     2. Style prompt block (with lock line check)
+     3. Exclude styles block (anti-hallucination / clean textures)
+     4. Lyrics map (16-section structure ending with `[End]`)
+     5. Tested slider settings (Variety 0, Weirdness 20–30, Style Influence 65–75)
+   - One-tap copy for each section that automatically checks off the step.
+   - Fingerprinted state tracking: resets checkboxes if the underlying prompt content is edited.
 
-## 4. Technical Architecture & Data Strategy
+2. **Pre-Flight Readiness Check Card (`BuildScreen.kt`)**:
+   - Real-time audit card that evaluates the package before copying:
+     - Style character cap check (`<= 1,000` chars; highlights current count)
+     - Mandatory sample preservation lock line present for Preserve jobs
+     - Lyrics map cap check (`<= 5,000` chars) and `[End]` tag presence
+     - Exclude negative prompt non-empty check
+     - Variety parameter advisory (warns if Variety > 0 that Suno will rewrite style prompts)
 
-```
-┌────────────────────────────────────────────────────────┐
-│               StyleGeneratorScreen                     │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │ Persistent Search Bar (Debounced 250ms, Clear X)  │  │
-│  └──────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │ Category Chips: All | Beef-Up | Gospel | Favorites│  │
-│  └──────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │ Live Result Counter: "12 of 150 prompts"          │  │
-│  └──────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │ LazyColumn (CuratedPromptItemCard)               │  │
-│  │  - Matched Term Highlighting (AnnotatedString)   │  │
-│  │  - Animated Heart Toggle (Scale + Color)         │  │
-│  │  - One-Tap Copy, Send-to-Build, System Share     │  │
-│  └──────────────────────────────────────────────────┘  │
-└──────────────────────────┬─────────────────────────────┘
-                           │
-                           ▼
-┌────────────────────────────────────────────────────────┐
-│                   MainViewModel                        │
-│  - searchQuery: StateFlow<String>                      │
-│  - selectedCategory: StateFlow<String>                 │
-│  - favoriteIds: StateFlow<Set<Long>>                   │
-│  - filteredPrompts: StateFlow<List<CuratedSunoPrompt>> │
-│  - toggleFavorite(prompt) / undoRemoveFavorite()       │
-└──────────────────────────┬─────────────────────────────┘
-                           │
-                           ▼
-┌────────────────────────────────────────────────────────┐
-│         Room Database (v3 with MIGRATION_2_3)          │
-│  ┌───────────────────────┐   ┌──────────────────────┐  │
-│  │      TakeDao          │   │  FavoritePromptDao   │  │
-│  │  (existing takes)     │   │  (saved favorites)   │  │
-│  └───────────────────────┘   └──────────────────────┘  │
-└────────────────────────────────────────────────────────┘
-```
-
-### Entities & DAOs
-1. **`FavoritePromptEntity`**:
-   - `id: Long` (Primary Key matching `CuratedSunoPrompt.id`)
-   - `prompt: String`
-   - `category: String`
-   - `subgenre: String`
-   - `bpmHint: String`
-   - `savedAt: Long` (Epoch millis for sorting)
-2. **`FavoritePromptDao`**:
-   - `getAllFavorites(): Flow<List<FavoritePromptEntity>>` (ORDER BY savedAt DESC)
-   - `getFavoriteIds(): Flow<List<Long>>`
-   - `insertFavorite(entity: FavoritePromptEntity): Long`
-   - `deleteFavoriteById(id: Long)`
-   - `isFavorite(id: Long): Boolean`
+3. **One-Tap Full Package from Analyze (`AnalyzeScreen.kt` & `MainViewModel.kt`)**:
+   - Direct "Build Full Preserve Package" button under the measurement grid that populates the Build screen with style, analysis-fitted lyrics framework, simple prompt, and exclude defense in a single tap.
 
 ---
 
-## 5. Verification & Test Plan
+### Phase 2: Enhancement Pass 2 (Dual Export, Studio Analytics & Hardening)
 
-1. **Automated Unit Tests**:
-   - **Suno 200-Character Limit Verification**: Verify all 150+ prompts in `CuratedPrompts.ALL_CURATED` are strictly ≤ 200 characters.
-   - **Search Logic Tests**: Test case-insensitivity, whitespace trimming, multi-word AND matching (`"808 hats"`), and zero-match empty state.
-   - **Room Favorites & Migration Tests**: Test insertion, duplicate prevention, deletion, and order preservation.
-2. **Robolectric & Compilation**:
-   - Verify migration from v2 to v3 schema without data loss.
-   - Run `gradle :app:testDebugUnitTest` and `compile_applet`.
+1. **Dual Export System (`FavoriteRepository.kt`, `TakeRepository.kt`, `TakesScreen.kt`)**:
+   - **Structured Suno Text**: Export clean, readable Markdown/plain-text files or clipboard strings with metadata, section headers, and prompt blocks formatted for Suno paste.
+   - **Cross-Platform JSON Backup**: Export and non-destructive merge-only import conforming to the web artifact's envelope specification (`{ "app": "BooDa Beat Enhancer", "kind": "take-package-backup", "version": 1, ... }`).
+
+2. **Takes Win-Rate & Studio Analytics (`TakesScreen.kt`)**:
+   - Live win-rate analytics pill: `Winners ÷ (Winners + Misses)` percentage calculation.
+   - Filterable tabs/chips: All, Winners, Pending, Misses, with live counts.
+   - "Duplicate Take" action for rapid iteration on winning beats.
+
+3. **Visual Polish & Touch Ergonomics (`design-guidelines` adherence)**:
+   - Consistent 48dp minimum touch targets on all icon buttons, checkboxes, and chips.
+   - Smooth Spring animations on checklist toggles, heart buttons, and copy confirmations.
+   - High-contrast M3 dark studio palette (`#0A0C10` background, Amber Gold `#F5A524`, Studio Cyan `#00D2FF`).
+
+---
+
+## Verification Plan
+
+### Automated Test Suite
+Run after each phase using `gradle :app:testDebugUnitTest`:
+1. `ExampleUnitTest.kt`:
+   - Verify all 150 curated prompts are strictly `<= 200` characters.
+   - Verify multi-word AND search query tokenizer with case-insensitivity and whitespace trimming.
+   - Verify Pre-Flight readiness rules and character count bounds.
+2. `ExampleRobolectricTest.kt`:
+   - Room migration `MIGRATION_1_2` and `MIGRATION_2_3` without data loss.
+   - `FavoritePromptDao` and `TakeDao` operations (insert, duplicate prevention via `OnConflictStrategy.REPLACE`, delete, flow ordering).
+   - Dual export/import round-trip: envelope JSON and structured text formats.
+   - Take win-rate calculation logic.
+
+### Manual Verification
+1. Launch app on emulator and verify all 7 bottom tabs (Analyze, Styles, Library, Build, Simple, Takes, Advisor).
+2. Record / upload audio in **Analyze** → click "Build Full Preserve Package" → verify instant population in **Build**.
+3. In **Build**, test the Pre-Flight checklist and Suno Handoff checklist, verifying one-tap copy and tick-off states.
+4. In **Styles**, search `808 hats`, verify term highlighting and live result counts.
+5. In **Takes**, test "Duplicate Take", test "Copy Full Package", and test "Download / Export" (both JSON and Text).
+6. Verify clean build via `compile_applet`.

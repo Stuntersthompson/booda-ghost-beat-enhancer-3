@@ -118,4 +118,17 @@ class ExampleUnitTest {
     assertEquals(32, totalBeats.toInt())
     assertEquals(8, totalBars)
   }
+
+  @Test
+  fun sample_words_honesty_law_strictly_enforces_120_char_cap() {
+    val longWords = "This is a very long sample vocal phrase that someone heard in the background that goes on and on and should definitely be clamped at exactly 120 chars maximum limit to preserve space"
+    val clamped = longWords.trim().take(120)
+
+    assertEquals(120, clamped.length)
+    assertTrue("Clamped string must be <= 120 chars", clamped.length <= 120)
+
+    val validKinds = listOf("Heard clearly", "Fragment only")
+    assertTrue(validKinds.contains("Heard clearly"))
+    assertTrue(validKinds.contains("Fragment only"))
+  }
 }

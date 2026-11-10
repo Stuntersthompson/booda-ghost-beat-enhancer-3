@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -36,8 +37,9 @@ fun LibraryScreen(viewModel: MainViewModel) {
   val allStyles = viewModel.bankRepo.stylePrompts
   val verifiedLanes = viewModel.bankRepo.verifiedLanes
 
-  // Filter prompts
+  // Multi-word AND filter prompts
   val filteredPrompts = remember(query, filterTrack, filterLane) {
+    val tokens = query.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
     allStyles.filter { p ->
       val matchesTrack = when (filterTrack) {
         "Track 1 (Original)" -> p.track == 1
@@ -46,10 +48,9 @@ fun LibraryScreen(viewModel: MainViewModel) {
         else -> true
       }
       val matchesLane = if (filterLane == "All") true else p.subgenre.equals(filterLane, ignoreCase = true)
-      val matchesQuery = if (query.isBlank()) true else {
-        p.text.contains(query, ignoreCase = true) || p.subgenre.contains(query, ignoreCase = true)
-      }
-      matchesTrack && matchesLane && matchesQuery
+      val haystack = "${p.text} ${p.subgenre} Track ${p.track}".lowercase()
+      val matchesTokens = if (tokens.isEmpty()) true else tokens.all { haystack.contains(it) }
+      matchesTrack && matchesLane && matchesTokens
     }
   }
 
@@ -76,12 +77,19 @@ fun LibraryScreen(viewModel: MainViewModel) {
         )
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Search Field
+        // Search Field with Clear (X) Button
         OutlinedTextField(
           value = query,
           onValueChange = { viewModel.setLibraryQuery(it) },
           placeholder = { Text("Search style prompts, 808s, textures...", color = TextMuted) },
           leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary) },
+          trailingIcon = {
+            if (query.isNotEmpty()) {
+              IconButton(onClick = { viewModel.setLibraryQuery("") }) {
+                Icon(Icons.Default.Close, contentDescription = "Clear search", tint = TextSecondary)
+              }
+            }
+          },
           singleLine = true,
           shape = RoundedCornerShape(10.dp),
           colors = OutlinedTextFieldDefaults.colors(
@@ -92,6 +100,31 @@ fun LibraryScreen(viewModel: MainViewModel) {
           ),
           modifier = Modifier.fillMaxWidth().testTag("input_library_search")
         )
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = "Showing ${filteredPrompts.size} of ${allStyles.size} prompts",
+            style = MaterialTheme.typography.labelSmall,
+            color = StudioCyan
+          )
+          if (query.isNotEmpty() || filterTrack != "All" || filterLane != "All") {
+            TextButton(
+              onClick = {
+                viewModel.setLibraryQuery("")
+                viewModel.setLibraryFilterTrack("All")
+                viewModel.setLibraryFilterLane("All")
+              },
+              contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+            ) {
+              Text("Reset Filters", style = MaterialTheme.typography.labelSmall, color = AmberGold)
+            }
+          }
+        }
       }
     }
 

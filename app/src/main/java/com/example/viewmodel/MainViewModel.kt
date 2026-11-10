@@ -190,14 +190,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   fun updateStylePrompt(text: String) {
     _stylePrompt.value = text
+    resetHandoffSteps()
   }
 
   fun updateLyricsMap(text: String) {
     _lyricsMap.value = text
+    resetHandoffSteps()
   }
 
   fun updateExcludeText(text: String) {
     _excludeText.value = text
+    resetHandoffSteps()
   }
 
   fun updateSimplePrompt(text: String? = null) {
@@ -376,6 +379,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       bpm = kotlin.math.round(newBpm * 10) / 10.0,
       pocketLabel = "${newBpm.toInt()} BPM · ${if (current.centroidHz > 3000) "Bright" else "Dark"}"
     )
+  }
+
+  fun setSampleWords(words: String?, kind: String = "Heard clearly") {
+    val current = _audioAnalysis.value ?: return
+    val trimmed = words?.trim()?.take(120)
+    val updated = if (trimmed.isNullOrBlank()) {
+      current.copy(sampleWordsText = null, sampleWordsKind = null)
+    } else {
+      current.copy(sampleWordsText = trimmed, sampleWordsKind = kind)
+    }
+    _audioAnalysis.value = updated
   }
 
   fun sendAnalysisToBuild() {
@@ -579,6 +593,92 @@ ${_lyricsMap.value}
       current.removeAt(current.size - 1)
     }
     _recentPrompts.value = current
+  }
+
+  // Suno Handoff Checklist Tracking (Steps 1..5)
+  private val _handoffStepsDone = MutableStateFlow<Set<Int>>(emptySet())
+  val handoffStepsDone: StateFlow<Set<Int>> = _handoffStepsDone.asStateFlow()
+
+  fun resetHandoffSteps() {
+    _handoffStepsDone.value = emptySet()
+  }
+
+  fun copyHandoffStep(context: Context, step: Int) {
+    val isPreserve = _jobType.value == JobType.PRESERVE
+    when (step) {
+      1 -> { // Route
+        val routeText = if (isPreserve) "Route: Extend | Audio Influence: ${_audioInfluence.value}" else "Route: Create (Standard)"
+        copyToClipboard(context, "Route Guidance", routeText)
+      }
+      2 -> { // Style
+        copyToClipboard(context, "Style Prompt", _stylePrompt.value)
+      }
+      3 -> { // Exclude
+        copyToClipboard(context, "Exclude Styles", _excludeText.value)
+      }
+      4 -> { // Lyrics
+        copyToClipboard(context, "Lyrics Map", _lyricsMap.value)
+      }
+      5 -> { // Settings
+        val settingsText = "Model v6 · Variety ${_variety.value} · Weirdness ${_weirdness.value} · Style Influence ${_styleInfluence.value} · Audio Influence ${_audioInfluence.value}"
+        copyToClipboard(context, "Suno Settings", settingsText)
+      }
+    }
+    _handoffStepsDone.value = _handoffStepsDone.value + step
+  }
+
+  fun toggleHandoffStep(step: Int) {
+    val current = _handoffStepsDone.value
+    _handoffStepsDone.value = if (current.contains(step)) current - step else current + step
+  }
+
+  fun loadFullPreservePackageFromAnalysis() {
+    val a = _audioAnalysis.value ?: return
+    _jobType.value = JobType.PRESERVE
+    setLane(a.suggestedLane)
+    _stylePrompt.value = a.promptPreserve
+    _lyricsMap.value = bankRepo.buildV6LyricsMap(a.suggestedLane, JobType.PRESERVE)
+    if (bankRepo.excludeBanks.isNotEmpty()) {
+      _excludeText.value = bankRepo.excludeBanks[0].text
+    }
+    _variety.value = 0
+    _weirdness.value = 25
+    _styleInfluence.value = 70
+    _audioInfluence.value = 80
+    updateSimplePrompt()
+    resetHandoffSteps()
+    _currentTab.value = StudioTab.BUILD
+  }
+
+  fun exportTakes(context: Context, asJson: Boolean = true) {
+    viewModelScope.launch {
+      val takes = takesList.value
+      if (takes.isEmpty()) {
+        Toast.makeText(context, "No takes logged to export!", Toast.LENGTH_SHORT).show()
+        return@launch
+      }
+      val content = if (asJson) {
+        takeRepo.exportTakesJson(takes)
+      } else {
+        takeRepo.exportTakesPlainText(takes)
+      }
+      val sendIntent = Intent().apply {
+        action = Intent.ACTION_SEND
+        putExtra(Intent.EXTRA_TITLE, "BooDa Beat Takes Export")
+        putExtra(Intent.EXTRA_TEXT, content)
+        type = if (asJson) "application/json" else "text/plain"
+      }
+      val shareIntent = Intent.createChooser(sendIntent, "Export Production Takes")
+      shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(shareIntent)
+    }
+  }
+
+  fun importTakes(context: Context, jsonStr: String) {
+    viewModelScope.launch {
+      val count = takeRepo.importTakesJson(jsonStr)
+      Toast.makeText(context, "Imported $count take(s) into Logbook", Toast.LENGTH_SHORT).show()
+    }
   }
 
   fun sharePrompt(context: Context, title: String, text: String) {

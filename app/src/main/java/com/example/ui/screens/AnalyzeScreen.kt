@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -189,6 +190,10 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
 
       // "What The Sample Says" Honesty Card
       item {
+        var showWordsDialog by remember { mutableStateOf(false) }
+        var wordsInput by remember { mutableStateOf(analysis?.sampleWordsText ?: "") }
+        var wordsKind by remember { mutableStateOf(analysis?.sampleWordsKind ?: "Heard clearly") }
+
         Surface(
           color = StudioCard,
           shape = RoundedCornerShape(12.dp),
@@ -224,14 +229,138 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
               shape = RoundedCornerShape(8.dp),
               modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
             ) {
-              Text(
-                text = aiConsultation?.heardVocalText ?: "Instrumental stem detected. No clear vocal lyrics isolated.",
-                style = MonospacePrompt,
-                color = TextPrimary,
-                modifier = Modifier.padding(10.dp)
-              )
+              Column(modifier = Modifier.padding(10.dp)) {
+                if (analysis?.sampleWordsText != null) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                      color = StudioCardElevated,
+                      shape = RoundedCornerShape(4.dp)
+                    ) {
+                      Text(
+                        text = analysis!!.sampleWordsKind ?: "Heard clearly",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                        color = StudioCyan,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                      )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                      text = "\"${analysis!!.sampleWordsText}\"",
+                      style = MonospacePrompt.copy(fontSize = 12.sp),
+                      color = TextPrimary
+                    )
+                  }
+                } else {
+                  Text(
+                    text = aiConsultation?.heardVocalText ?: "No words made out. (Sampled vocals remain preservation-locked)",
+                    style = MonospacePrompt.copy(fontSize = 12.sp),
+                    color = TextSecondary
+                  )
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.End,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              if (analysis?.sampleWordsText != null) {
+                TextButton(
+                  onClick = { viewModel.setSampleWords(null) },
+                  contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                  Text("Clear Words", style = MaterialTheme.typography.labelSmall, color = StudioMiss)
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+              }
+              OutlinedButton(
+                onClick = {
+                  wordsInput = analysis?.sampleWordsText ?: ""
+                  wordsKind = analysis?.sampleWordsKind ?: "Heard clearly"
+                  showWordsDialog = true
+                },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.height(30.dp)
+              ) {
+                Icon(Icons.Default.Edit, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(12.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                  text = if (analysis?.sampleWordsText != null) "Edit Words" else "Type What You Heard",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = StudioCyan
+                )
+              }
             }
           }
+        }
+
+        if (showWordsDialog) {
+          AlertDialog(
+            onDismissRequest = { showWordsDialog = false },
+            title = { Text("What The Sample Says", color = TextPrimary) },
+            text = {
+              Column {
+                Text(
+                  text = "Honesty rule: Only enter words you actually heard. Max 120 characters, no guessed completions.",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                  value = wordsInput,
+                  onValueChange = { if (it.length <= 120) wordsInput = it },
+                  placeholder = { Text("e.g. hold on to faith, I need you...") },
+                  label = { Text("Identified Words (${wordsInput.length}/120)") },
+                  modifier = Modifier.fillMaxWidth(),
+                  singleLine = true,
+                  textStyle = MonospacePrompt.copy(color = TextPrimary)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("Confidence Label:", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                  listOf("Heard clearly", "Fragment only").forEach { kind ->
+                    val selected = wordsKind == kind
+                    Surface(
+                      color = if (selected) AmberGold else StudioCardElevated,
+                      shape = RoundedCornerShape(12.dp),
+                      modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { wordsKind = kind }
+                        .border(0.5.dp, StudioBorder, RoundedCornerShape(12.dp))
+                    ) {
+                      Text(
+                        text = kind,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = if (selected) Color.Black else TextPrimary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                      )
+                    }
+                  }
+                }
+              }
+            },
+            confirmButton = {
+              Button(
+                onClick = {
+                  viewModel.setSampleWords(wordsInput, wordsKind)
+                  showWordsDialog = false
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = AmberGold)
+              ) {
+                Text("Save Words", color = Color.Black)
+              }
+            },
+            dismissButton = {
+              TextButton(onClick = { showWordsDialog = false }) {
+                Text("Cancel", color = TextSecondary)
+              }
+            },
+            containerColor = StudioCardElevated
+          )
         }
       }
 
@@ -332,32 +461,74 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
         }
       }
 
-      // Handoff to Build / Simple
+      // One-Tap Package & Handoff Actions
       item {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
           Button(
-            onClick = { viewModel.sendAnalysisToBuild() },
+            onClick = { viewModel.loadFullPreservePackageFromAnalysis() },
             colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
             shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.weight(1f).height(46.dp).testTag("action_send_to_build")
-          ) {
-            Icon(Icons.Default.Build, contentDescription = null, tint = Color.Black)
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Send to Build", color = Color.Black)
-          }
-
-          Button(
-            onClick = { viewModel.sendAnalysisToSimple() },
-            colors = ButtonDefaults.buttonColors(containerColor = StudioCyan),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.weight(1f).height(46.dp).testTag("action_send_to_simple")
+            modifier = Modifier.fillMaxWidth().height(48.dp).testTag("action_load_full_preserve")
           ) {
             Icon(Icons.Default.Bolt, contentDescription = null, tint = Color.Black)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Build Full Preserve Package", style = MaterialTheme.typography.titleMedium, color = Color.Black)
+          }
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Button(
+              onClick = { viewModel.sendAnalysisToBuild() },
+              colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
+              shape = RoundedCornerShape(10.dp),
+              modifier = Modifier.weight(1f).height(46.dp).testTag("action_send_to_build")
+            ) {
+              Icon(Icons.Default.Build, contentDescription = null, tint = AmberGold)
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("Send to Build", color = TextPrimary)
+            }
+
+            Button(
+              onClick = { viewModel.sendAnalysisToSimple() },
+              colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
+              shape = RoundedCornerShape(10.dp),
+              modifier = Modifier.weight(1f).height(46.dp).testTag("action_send_to_simple")
+            ) {
+              Icon(Icons.Default.Tune, contentDescription = null, tint = StudioCyan)
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("Send to Simple", color = TextPrimary)
+            }
+          }
+
+          OutlinedButton(
+            onClick = {
+              val a = analysis ?: return@OutlinedButton
+              val report = """=== BOODA BEAT ANALYSIS REPORT ===
+File: ${a.fileName}
+Tempo: ${a.bpm?.toInt() ?: 0} BPM (${a.bpmConfidence} confidence)
+Musical Key: ${a.keyName ?: "Unread"}
+Brightness Centroid: ${a.centroidHz.toInt()} Hz (${a.pocketLabel})
+Onset Density: ${a.onsetRate} hits/sec
+Suggested Lane: ${a.suggestedLane}
+Sample Vocals: ${aiConsultation?.heardVocalText ?: (a.sampleWordsText ?: "No clear words isolated")}
+
+[SUGGESTED SUNO PRESERVE PROMPT]
+${a.promptPreserve}
+
+[SUGGESTED SUNO ORIGINAL PROMPT]
+${a.promptOriginal}
+===================================""".trimIndent()
+              viewModel.copyToClipboard(context, "Beat Analysis Report", report)
+            },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = StudioCyan),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth().height(44.dp).testTag("action_copy_analysis_report")
+          ) {
+            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Send to Simple", color = Color.Black)
+            Text("Copy Full Analysis Report", style = MaterialTheme.typography.labelLarge, color = StudioCyan)
           }
         }
       }

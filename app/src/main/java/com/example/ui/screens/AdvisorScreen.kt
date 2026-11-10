@@ -142,6 +142,44 @@ fun AdvisorScreen(viewModel: MainViewModel) {
       }
     }
 
+    // Credits, Upload Limits & Slider Semantics
+    item {
+      Surface(
+        color = StudioCard,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, StudioBorder, RoundedCornerShape(12.dp))
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Text(
+            text = "CREDITS, LIMITS & SLIDER SEMANTICS",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = StudioCyan
+          )
+          Spacer(modifier = Modifier.height(10.dp))
+
+          TroubleItem(
+            issue = "Generation Cost",
+            fix = "Standard generation costs 10 credits (generates 2 songs). Max Mode costs double (20 credits) for long tracks or close covers."
+          )
+
+          TroubleItem(
+            issue = "Upload Limits",
+            fix = "Free tier: up to 60 seconds. Pro/Premier tier: up to 8 minutes. Single v6 generation runs up to 8 minutes; Extend continues past it."
+          )
+
+          TroubleItem(
+            issue = "Variety Slider",
+            fix = "Controls prompt rewriting. At Variety 0, Suno keeps your style text verbatim. Above 0, Suno dynamically rewrites the style prompt."
+          )
+
+          TroubleItem(
+            issue = "Weirdness Slider",
+            fix = "Controls conventionality. 50% is normal expected result. The tested 20-30 band is safe-side for sample fidelity and tight bounce."
+          )
+        }
+      }
+    }
+
     // Common Fixes Flowchart
     item {
       Surface(

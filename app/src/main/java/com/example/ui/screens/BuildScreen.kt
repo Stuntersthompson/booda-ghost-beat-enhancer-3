@@ -176,7 +176,94 @@ fun BuildScreen(viewModel: MainViewModel) {
       )
     }
 
-    // 5. Pre-flight Quality Checklist
+    // 5. Suno v6 Step-by-Step Handoff Checklist
+    item {
+      val handoffStepsDone by viewModel.handoffStepsDone.collectAsState()
+      val doneCount = handoffStepsDone.size
+
+      Surface(
+        color = StudioCard,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .border(1.dp, StudioBorder, RoundedCornerShape(12.dp))
+          .testTag("suno_handoff_card")
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(Icons.Default.PlaylistAddCheck, contentDescription = null, tint = AmberGold, modifier = Modifier.size(18.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("SUNO V6 HANDOFF CHECKLIST", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+            }
+            Surface(
+              color = if (doneCount == 5) Color(0x3310B981) else StudioCardElevated,
+              shape = RoundedCornerShape(6.dp)
+            ) {
+              Text(
+                text = "$doneCount OF 5 READY",
+                style = MonospaceMetric.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                color = if (doneCount == 5) StudioWinner else StudioCyan,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          HandoffStepItem(
+            stepNumber = 1,
+            title = if (isPreserve) "Route: Extend (Audio Influence $audioInfluence)" else "Route: Create (Standard)",
+            sub = if (isPreserve) "Locks uploaded audio backbone" else "Fresh generative beat",
+            isDone = handoffStepsDone.contains(1),
+            onToggle = { viewModel.toggleHandoffStep(1) },
+            onCopy = { viewModel.copyHandoffStep(context, 1) }
+          )
+
+          HandoffStepItem(
+            stepNumber = 2,
+            title = "Style of Music Box (${stylePrompt.length}/1000c)",
+            sub = if (isPreserve && hasLockLine) "Preserve lock line included" else "Base style + lane sound design",
+            isDone = handoffStepsDone.contains(2),
+            onToggle = { viewModel.toggleHandoffStep(2) },
+            onCopy = { viewModel.copyHandoffStep(context, 2) }
+          )
+
+          HandoffStepItem(
+            stepNumber = 3,
+            title = "Exclude Styles Box (${excludeText.length}/1000c)",
+            sub = "Anti-hallucination & clean textures",
+            isDone = handoffStepsDone.contains(3),
+            onToggle = { viewModel.toggleHandoffStep(3) },
+            onCopy = { viewModel.copyHandoffStep(context, 3) }
+          )
+
+          HandoffStepItem(
+            stepNumber = 4,
+            title = "Lyrics Box Structure (${lyricsMap.length}/5000c)",
+            sub = if (hasEndTag) "16-section map ending with [End]" else "Structure map",
+            isDone = handoffStepsDone.contains(4),
+            onToggle = { viewModel.toggleHandoffStep(4) },
+            onCopy = { viewModel.copyHandoffStep(context, 4) }
+          )
+
+          HandoffStepItem(
+            stepNumber = 5,
+            title = "Tested Parameter Sliders",
+            sub = "Variety $variety · Weirdness $weirdness · Style $styleInfluence · Audio $audioInfluence",
+            isDone = handoffStepsDone.contains(5),
+            onToggle = { viewModel.toggleHandoffStep(5) },
+            onCopy = { viewModel.copyHandoffStep(context, 5) }
+          )
+        }
+      }
+    }
+
+    // 6. Pre-flight Quality Checklist
     item {
       Surface(
         color = StudioCard,
@@ -189,13 +276,13 @@ fun BuildScreen(viewModel: MainViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Text("SUNO V6 PRE-FLIGHT CHECK", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
+            Text("PRE-FLIGHT READINESS AUDIT", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
             Surface(
               color = if (allClear) Color(0x3310B981) else Color(0x33EF4444),
               shape = RoundedCornerShape(6.dp)
             ) {
               Text(
-                text = if (allClear) "READY TO ROLL" else "ATTENTION NEEDED",
+                text = if (allClear) "READY FOR SUNO" else "NEEDS ATTENTION",
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                 color = if (allClear) StudioWinner else StudioMiss,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -222,11 +309,19 @@ fun BuildScreen(viewModel: MainViewModel) {
             isOk = isStyleOk && isLyricsOk && isExcludeOk,
             note = "Style: ${stylePrompt.length}/1000 · Lyrics: ${lyricsMap.length}/5000 · Exclude: ${excludeText.length}/1000"
           )
+
+          if (variety > 0) {
+            ChecklistItem(
+              title = "Variety Slider Advisory",
+              isOk = false,
+              note = "Variety is $variety (>0 triggers Suno's prompt rewriter; set to 0 for verbatim prompt adherence)"
+            )
+          }
         }
       }
     }
 
-    // 6. Action Buttons: Copy Bundle & Save Take
+    // 7. Action Buttons: Copy Bundle & Save Take
     item {
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -267,20 +362,20 @@ fun BuildScreen(viewModel: MainViewModel) {
       title = { Text("Save Take to Logbook", color = TextPrimary) },
       text = {
         Column {
-          Text("Assign a name to log this Suno package and track its generation outcome:", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+          Text("Assign a name to log this Suno package and track its generation outcome (max 120 chars):", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
           Spacer(modifier = Modifier.height(10.dp))
           OutlinedTextField(
             value = takeNameInput,
-            onValueChange = { takeNameInput = it },
-            label = { Text("Take Name") },
+            onValueChange = { if (it.length <= 120) takeNameInput = it },
+            label = { Text("Take Name (${takeNameInput.length}/120)") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().testTag("input_save_take_name")
           )
           Spacer(modifier = Modifier.height(8.dp))
           OutlinedTextField(
             value = beatTitleInput,
-            onValueChange = { beatTitleInput = it },
-            label = { Text("Beat Title / Project") },
+            onValueChange = { if (it.length <= 120) beatTitleInput = it },
+            label = { Text("Beat Title / Project (${beatTitleInput.length}/120)") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().testTag("input_save_beat_title")
           )
@@ -308,6 +403,46 @@ fun BuildScreen(viewModel: MainViewModel) {
       },
       containerColor = StudioCardElevated
     )
+  }
+}
+
+@Composable
+private fun HandoffStepItem(
+  stepNumber: Int,
+  title: String,
+  sub: String,
+  isDone: Boolean,
+  onToggle: () -> Unit,
+  onCopy: () -> Unit
+) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(vertical = 4.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.SpaceBetween
+  ) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier.weight(1f)
+    ) {
+      IconButton(onClick = onToggle, modifier = Modifier.size(32.dp)) {
+        Icon(
+          imageVector = if (isDone) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+          contentDescription = null,
+          tint = if (isDone) StudioWinner else TextMuted,
+          modifier = Modifier.size(20.dp)
+        )
+      }
+      Spacer(modifier = Modifier.width(4.dp))
+      Column {
+        Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = TextPrimary)
+        Text(sub, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+      }
+    }
+    IconButton(onClick = onCopy, modifier = Modifier.size(36.dp)) {
+      Icon(Icons.Default.ContentCopy, contentDescription = "Copy step", tint = StudioCyan, modifier = Modifier.size(16.dp))
+    }
   }
 }
 
