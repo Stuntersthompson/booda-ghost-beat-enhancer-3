@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -27,7 +28,8 @@ fun StudioTopBar(
   activeLane: String,
   jobType: JobType,
   onJobTypeChanged: (JobType) -> Unit,
-  onLaneClick: () -> Unit
+  onLaneClick: () -> Unit,
+  onSettingsClick: () -> Unit = {}
 ) {
   Surface(
     color = StudioSurface,
@@ -80,31 +82,51 @@ fun StudioTopBar(
           }
         }
 
-        // Active Lane Selector Chip
-        Surface(
-          color = StudioCardElevated,
-          shape = RoundedCornerShape(16.dp),
-          modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { onLaneClick() }
-            .border(1.dp, StudioBorder, RoundedCornerShape(16.dp))
-            .testTag("active_lane_chip")
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically
+          // Active Lane Selector Chip
+          Surface(
+            color = StudioCardElevated,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+              .clip(RoundedCornerShape(16.dp))
+              .clickable { onLaneClick() }
+              .border(1.dp, StudioBorder, RoundedCornerShape(16.dp))
+              .testTag("active_lane_chip")
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(
+                imageVector = Icons.Default.Tune,
+                contentDescription = "Lane",
+                tint = StudioCyan,
+                modifier = Modifier.size(14.dp)
+              )
+              Spacer(modifier = Modifier.width(5.dp))
+              Text(
+                text = activeLane,
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = TextPrimary
+              )
+            }
+          }
+
+          // Studio Settings Drawer Button
+          IconButton(
+            onClick = onSettingsClick,
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .testTag("action_open_settings")
           ) {
             Icon(
-              imageVector = Icons.Default.Tune,
-              contentDescription = "Lane",
-              tint = StudioCyan,
-              modifier = Modifier.size(14.dp)
-            )
-            Spacer(modifier = Modifier.width(5.dp))
-            Text(
-              text = activeLane,
-              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-              color = TextPrimary
+              imageVector = Icons.Default.Settings,
+              contentDescription = "Studio Settings",
+              tint = TextSecondary,
+              modifier = Modifier.size(20.dp)
             )
           }
         }

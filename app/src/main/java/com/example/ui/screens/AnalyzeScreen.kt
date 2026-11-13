@@ -41,6 +41,7 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
   val isAnalyzing by viewModel.isAnalyzing.collectAsState()
   val aiConsultation by viewModel.aiConsultation.collectAsState()
   val liveWaveform by viewModel.liveWaveform.collectAsState()
+  val visualizerSensitivity by viewModel.visualizerSensitivity.collectAsState()
 
   // SAF Audio Picker
   val audioPickerLauncher = rememberLauncherForActivityResult(
@@ -141,7 +142,8 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
               amplitudes = liveWaveform,
               isLiveRecording = true,
               currentPeakDb = recordingPeak,
-              currentRmsDb = recordingDb
+              currentRmsDb = recordingDb,
+              sensitivity = visualizerSensitivity
             )
           } else if (analysis == null && !isAnalyzing) {
             // Standby Groove Monitor
@@ -150,7 +152,8 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
               amplitudes = liveWaveform,
               isLiveRecording = false,
               bpm = null,
-              durationSec = 0.0
+              durationSec = 0.0,
+              sensitivity = visualizerSensitivity
             )
           }
 
@@ -177,7 +180,8 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
           amplitudes = analysis!!.waveformPeaks,
           isLiveRecording = false,
           bpm = analysis!!.bpm,
-          durationSec = analysis!!.durationSec
+          durationSec = analysis!!.durationSec,
+          sensitivity = visualizerSensitivity
         )
       }
 

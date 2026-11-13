@@ -18,6 +18,7 @@ import com.example.data.db.AppDatabase
 import com.example.data.model.*
 import com.example.data.repository.FavoriteRepository
 import com.example.data.repository.PromptBankRepository
+import com.example.data.repository.StudioPreferencesRepository
 import com.example.data.repository.TakeRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -44,9 +45,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val database = AppDatabase.getDatabase(application)
   val takeRepo = TakeRepository(database.takeDao())
   val favoriteRepo = FavoriteRepository(database.favoritePromptDao())
+  val preferencesRepo = StudioPreferencesRepository(application)
   private val audioAnalyzer = AudioAnalyzer(application)
   private val audioRecorder = AudioRecorder()
   private val geminiService = GeminiBeatService()
+
+  // Studio Visualizer Preferences
+  val visualizerSensitivity: StateFlow<Float> = preferencesRepo.visualizerSensitivity
+  val peakHoldEnabled: StateFlow<Boolean> = preferencesRepo.peakHoldEnabled
+
+  fun setVisualizerSensitivity(multiplier: Float) {
+    preferencesRepo.setVisualizerSensitivity(multiplier)
+  }
+
+  fun resetVisualizerSensitivity() {
+    preferencesRepo.resetVisualizerSensitivity()
+  }
+
+  fun setPeakHoldEnabled(enabled: Boolean) {
+    preferencesRepo.setPeakHoldEnabled(enabled)
+  }
 
   // Favorites System
   val allFavorites: StateFlow<List<FavoritePromptEntity>> = favoriteRepo.allFavorites
@@ -122,8 +140,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val _recordingDb = MutableStateFlow(-60f)
   val recordingDb: StateFlow<Float> = _recordingDb.asStateFlow()
 
-  private val _liveWaveform = MutableStateFlow<List<Float>>(List(64) { 0.05f })
-  val liveWaveform: StateFlow<List<Float>> = _liveWaveform.asStateFlow()
+  private val rollingWaveformBuffer = FloatArray(80) { 0.05f }
+  private val _liveWaveform = MutableStateFlow(FloatArray(80) { 0.05f })
+  val liveWaveform: StateFlow<FloatArray> = _liveWaveform.asStateFlow()
 
   private val _isAnalyzing = MutableStateFlow(false)
   val isAnalyzing: StateFlow<Boolean> = _isAnalyzing.asStateFlow()
@@ -327,19 +346,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     if (started) {
       _isRecording.value = true
-      _liveWaveform.value = List(64) { 0.05f }
+      rollingWaveformBuffer.fill(0.05f)
+      _liveWaveform.value = rollingWaveformBuffer.copyOf()
       viewModelScope.launch {
         val samples = audioRecorder.recordAudio(maxDurationSec = 15) { peak, db, blockPeaks ->
           _recordingPeak.value = peak
           _recordingDb.value = db
-          val currentList = _liveWaveform.value.toMutableList()
-          for (p in blockPeaks) {
-            currentList.add(p.coerceIn(0.04f, 1f))
-            if (currentList.size > 80) {
-              currentList.removeAt(0)
+          val shift = blockPeaks.size.coerceAtMost(rollingWaveformBuffer.size)
+          if (shift > 0) {
+            val remaining = rollingWaveformBuffer.size - shift
+            if (remaining > 0) {
+              System.arraycopy(rollingWaveformBuffer, shift, rollingWaveformBuffer, 0, remaining)
             }
+            for (k in 0 until shift) {
+              rollingWaveformBuffer[remaining + k] = blockPeaks[k].coerceIn(0.04f, 1f)
+            }
+            _liveWaveform.value = rollingWaveformBuffer.copyOf()
           }
-          _liveWaveform.value = currentList
         }
         _isRecording.value = false
         if (samples.isNotEmpty()) {

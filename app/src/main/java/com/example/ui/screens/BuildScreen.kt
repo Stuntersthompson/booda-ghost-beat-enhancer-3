@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
+import com.example.ui.components.CompactWaveformMeter
 import com.example.ui.components.PromptBox
 import com.example.ui.components.SettingsCardView
 import com.example.ui.theme.*
@@ -38,6 +39,11 @@ fun BuildScreen(viewModel: MainViewModel) {
   val weirdness by viewModel.weirdness.collectAsState()
   val styleInfluence by viewModel.styleInfluence.collectAsState()
   val audioInfluence by viewModel.audioInfluence.collectAsState()
+
+  val audioAnalysis by viewModel.audioAnalysis.collectAsState()
+  val liveWaveform by viewModel.liveWaveform.collectAsState()
+  val isRecording by viewModel.isRecording.collectAsState()
+  val visualizerSensitivity by viewModel.visualizerSensitivity.collectAsState()
 
   var showSaveModal by remember { mutableStateOf(false) }
   var takeNameInput by remember { mutableStateOf("") }
@@ -61,6 +67,74 @@ fun BuildScreen(viewModel: MainViewModel) {
     contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
+    // Studio Groove & Audio Preview Monitor
+    item {
+      val displayAmps = if (audioAnalysis != null && audioAnalysis!!.waveformPeaks.isNotEmpty()) {
+        audioAnalysis!!.waveformPeaks
+      } else {
+        liveWaveform
+      }
+
+      Surface(
+        color = StudioCard,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .border(1.dp, StudioBorder, RoundedCornerShape(12.dp))
+          .testTag("build_groove_monitor")
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(
+                imageVector = Icons.Default.Equalizer,
+                contentDescription = null,
+                tint = StudioCyan,
+                modifier = Modifier.size(16.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "GROOVE PREVIEW MONITOR",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = StudioCyan
+              )
+            }
+            Surface(
+              color = if (audioAnalysis != null) AmberGold.copy(alpha = 0.15f) else StudioCardElevated,
+              shape = RoundedCornerShape(4.dp)
+            ) {
+              Text(
+                text = if (audioAnalysis != null) {
+                  "%.1f BPM • %s".format(audioAnalysis!!.bpm, audioAnalysis!!.keyName)
+                } else if (isRecording) {
+                  "LIVE MIC MONITOR"
+                } else {
+                  "GROOVE CONTOUR"
+                },
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                color = if (audioAnalysis != null) AmberGold else TextSecondary,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          CompactWaveformMeter(
+            amplitudes = displayAmps,
+            sensitivity = visualizerSensitivity,
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(44.dp)
+          )
+        }
+      }
+    }
+
     // Quick Actions Bar
     item {
       Row(

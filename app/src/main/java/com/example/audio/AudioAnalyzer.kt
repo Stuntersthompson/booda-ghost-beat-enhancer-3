@@ -29,7 +29,11 @@ data class AudioAnalysisResult(
   val sampleWordsText: String? = null,
   val sampleWordsKind: String? = null,
   val waveformPeaks: List<Float> = emptyList()
-)
+) {
+  val waveformPeaksArray: FloatArray by lazy(LazyThreadSafetyMode.NONE) {
+    waveformPeaks.toFloatArray()
+  }
+}
 
 class AudioAnalyzer(private val context: Context) {
 

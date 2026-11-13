@@ -2,6 +2,7 @@ package com.example
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -24,12 +25,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.StudioBottomBar
+import com.example.ui.components.StudioSettingsDrawerSheet
 import com.example.ui.components.StudioTopBar
 import com.example.ui.screens.*
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.StudioTab
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -48,45 +52,73 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainAppContent(viewModel: MainViewModel) {
-  val currentTab by viewModel.currentTab.collectAsState()
-  val activeLane by viewModel.activeLane.collectAsState()
-  val jobType by viewModel.jobType.collectAsState()
+  val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
+  val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
+  val jobType by viewModel.jobType.collectAsStateWithLifecycle()
 
   var showLaneDialog by remember { mutableStateOf(false) }
 
-  Scaffold(
-    modifier = Modifier.fillMaxSize(),
-    containerColor = StudioBg,
-    contentWindowInsets = WindowInsets(0, 0, 0, 0),
-    topBar = {
-      StudioTopBar(
-        activeLane = activeLane,
-        jobType = jobType,
-        onJobTypeChanged = { viewModel.setJobType(it) },
-        onLaneClick = { showLaneDialog = true }
-      )
-    },
-    bottomBar = {
-      StudioBottomBar(
-        currentTab = currentTab,
-        onTabSelected = { viewModel.setTab(it) }
+  // DrawerState uses rememberSaveable internally so open/closed state survives rotation & recreation
+  val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+  val coroutineScope = rememberCoroutineScope()
+
+  // Close the navigation drawer on system Back press before any screen navigation or exit
+  BackHandler(enabled = drawerState.isOpen) {
+    coroutineScope.launch {
+      drawerState.close()
+    }
+  }
+
+  ModalNavigationDrawer(
+    drawerState = drawerState,
+    gesturesEnabled = true,
+    scrimColor = Color.Black.copy(alpha = 0.65f),
+    drawerContent = {
+      StudioSettingsDrawerSheet(
+        viewModel = viewModel,
+        onClose = {
+          coroutineScope.launch { drawerState.close() }
+        }
       )
     }
-  ) { innerPadding ->
-    Box(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(innerPadding)
-    ) {
-      when (currentTab) {
-        StudioTab.ANALYZE -> AnalyzeScreen(viewModel)
-        StudioTab.STYLES -> StyleGeneratorScreen(viewModel)
-        StudioTab.LIBRARY -> LibraryScreen(viewModel)
-        StudioTab.BUILD -> BuildScreen(viewModel)
-        StudioTab.SIMPLE -> SimpleScreen(viewModel)
-        StudioTab.LANES -> LanesScreen(viewModel)
-        StudioTab.TAKES -> TakesScreen(viewModel)
-        StudioTab.ADVISOR -> AdvisorScreen(viewModel)
+  ) {
+    Scaffold(
+      modifier = Modifier.fillMaxSize(),
+      containerColor = StudioBg,
+      contentWindowInsets = WindowInsets(0, 0, 0, 0),
+      topBar = {
+        StudioTopBar(
+          activeLane = activeLane,
+          jobType = jobType,
+          onJobTypeChanged = { viewModel.setJobType(it) },
+          onLaneClick = { showLaneDialog = true },
+          onSettingsClick = {
+            coroutineScope.launch { drawerState.open() }
+          }
+        )
+      },
+      bottomBar = {
+        StudioBottomBar(
+          currentTab = currentTab,
+          onTabSelected = { viewModel.setTab(it) }
+        )
+      }
+    ) { innerPadding ->
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(innerPadding)
+      ) {
+        when (currentTab) {
+          StudioTab.ANALYZE -> AnalyzeScreen(viewModel)
+          StudioTab.STYLES -> StyleGeneratorScreen(viewModel)
+          StudioTab.LIBRARY -> LibraryScreen(viewModel)
+          StudioTab.BUILD -> BuildScreen(viewModel)
+          StudioTab.SIMPLE -> SimpleScreen(viewModel)
+          StudioTab.LANES -> LanesScreen(viewModel)
+          StudioTab.TAKES -> TakesScreen(viewModel)
+          StudioTab.ADVISOR -> AdvisorScreen(viewModel)
+        }
       }
     }
   }
@@ -124,7 +156,7 @@ fun MainAppContent(viewModel: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxSize()
           ) {
-            items(viewModel.bankRepo.allLanes) { lane ->
+            items(viewModel.bankRepo.allLanes, key = { it }) { lane ->
               val isSelected = lane == activeLane
               Surface(
                 color = if (isSelected) AmberContainer else StudioCard,

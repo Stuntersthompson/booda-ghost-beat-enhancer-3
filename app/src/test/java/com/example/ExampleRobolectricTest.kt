@@ -10,6 +10,7 @@ import com.example.data.model.SUNO_STYLE_BOX_LIMIT
 import com.example.data.model.TakeEntity
 import com.example.data.repository.CuratedPrompts
 import com.example.data.repository.PromptBankRepository
+import com.example.data.repository.StudioPreferencesRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -362,6 +363,36 @@ class ExampleRobolectricTest {
       assertTrue("Lane '$lane' lyrics map must end with [End]", map.trim().endsWith("[End]"))
       assertTrue("Lane '$lane' lyrics map must be <= 5000 chars", map.length <= 5000)
     }
+  }
+
+  @Test
+  fun testStudioPreferencesSensitivityPersistenceAndReload() {
+    val repo1 = StudioPreferencesRepository(context)
+    // Default must be 1.0f
+    assertEquals(1.0f, repo1.visualizerSensitivity.value, 0.001f)
+
+    // Set custom sensitivity multiplier
+    repo1.setVisualizerSensitivity(2.75f)
+    assertEquals(2.75f, repo1.visualizerSensitivity.value, 0.001f)
+
+    // Simulate app process recreation by creating a fresh instance against the same context
+    val repo2 = StudioPreferencesRepository(context)
+    assertEquals("Sensitivity must survive app reload", 2.75f, repo2.visualizerSensitivity.value, 0.001f)
+
+    // Test Reset action
+    repo2.resetVisualizerSensitivity()
+    assertEquals(1.0f, repo2.visualizerSensitivity.value, 0.001f)
+
+    // Verify reset was persisted
+    val repo3 = StudioPreferencesRepository(context)
+    assertEquals(1.0f, repo3.visualizerSensitivity.value, 0.001f)
+
+    // Test out-of-bounds clamping
+    repo3.setVisualizerSensitivity(10.0f)
+    assertEquals("Should clamp high values to 4.0f", 4.0f, repo3.visualizerSensitivity.value, 0.001f)
+
+    repo3.setVisualizerSensitivity(-2.0f)
+    assertEquals("Should clamp low values to 0.25f", 0.25f, repo3.visualizerSensitivity.value, 0.001f)
   }
 }
 
