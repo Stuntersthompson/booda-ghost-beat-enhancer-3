@@ -126,7 +126,6 @@ class AudioAnalyzer(private val context: Context) {
 
     val real = DoubleArray(fftSize)
     val imag = DoubleArray(fftSize)
-    val half = min(samples.size, 44100)
     for (i in 0 until fftSize) {
       real[i] = samples[i].toDouble() * (0.54 - 0.46 * cos(2 * PI * i / (fftSize - 1))) // Hamming window
       imag[i] = 0.0
@@ -287,6 +286,7 @@ class AudioAnalyzer(private val context: Context) {
 
   private fun decodeAudioUri(uri: Uri): FloatArray {
     val extractor = MediaExtractor()
+    var codec: MediaCodec? = null
     return try {
       extractor.setDataSource(context, uri, null)
       var audioTrackIndex = -1
@@ -306,9 +306,9 @@ class AudioAnalyzer(private val context: Context) {
       extractor.selectTrack(audioTrackIndex)
 
       val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-      val codec = MediaCodec.createDecoderByType(mime)
-      codec.configure(format, null, null, 0)
-      codec.start()
+      val activeCodec = MediaCodec.createDecoderByType(mime).also { codec = it }
+      activeCodec.configure(format, null, null, 0)
+      activeCodec.start()
 
       val outputFloats = mutableListOf<Float>()
       val info = MediaCodec.BufferInfo()
@@ -316,39 +316,46 @@ class AudioAnalyzer(private val context: Context) {
 
       val timeoutUs = 5000L
       while (!isEOS && outputFloats.size < 44100 * 30) {
-        val inIndex = codec.dequeueInputBuffer(timeoutUs)
+        val inIndex = activeCodec.dequeueInputBuffer(timeoutUs)
         if (inIndex >= 0) {
-          val buffer = codec.getInputBuffer(inIndex)
+          val buffer = activeCodec.getInputBuffer(inIndex)
           val sampleSize = if (buffer != null) extractor.readSampleData(buffer, 0) else -1
           if (sampleSize < 0) {
-            codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            activeCodec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
             isEOS = true
           } else {
-            codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
+            activeCodec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
             extractor.advance()
           }
         }
 
-        val outIndex = codec.dequeueOutputBuffer(info, timeoutUs)
+        val outIndex = activeCodec.dequeueOutputBuffer(info, timeoutUs)
         if (outIndex >= 0) {
-          val outBuffer = codec.getOutputBuffer(outIndex)
+          val outBuffer = activeCodec.getOutputBuffer(outIndex)
           if (outBuffer != null && info.size > 0) {
             val shortBuffer = outBuffer.asShortBuffer()
             while (shortBuffer.hasRemaining()) {
               outputFloats.add(shortBuffer.get() / 32768.0f)
             }
           }
-          codec.releaseOutputBuffer(outIndex, false)
+          activeCodec.releaseOutputBuffer(outIndex, false)
         }
       }
 
-      codec.stop()
-      codec.release()
-      extractor.release()
       outputFloats.toFloatArray()
     } catch (e: Exception) {
       e.printStackTrace()
       FloatArray(0)
+    } finally {
+      try {
+        codec?.stop()
+      } catch (_: Exception) {}
+      try {
+        codec?.release()
+      } catch (_: Exception) {}
+      try {
+        extractor.release()
+      } catch (_: Exception) {}
     }
   }
 

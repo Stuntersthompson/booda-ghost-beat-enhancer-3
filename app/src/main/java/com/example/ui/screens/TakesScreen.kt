@@ -9,9 +9,11 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -21,6 +23,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.TakeEntity
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
@@ -28,8 +31,8 @@ import com.example.viewmodel.MainViewModel
 @Composable
 fun TakesScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
-  val takesList by viewModel.takesList.collectAsState()
-  val filterResult by viewModel.takeFilterResult.collectAsState()
+  val takesList by viewModel.takesList.collectAsStateWithLifecycle()
+  val filterResult by viewModel.takeFilterResult.collectAsStateWithLifecycle()
 
   val totalTakes = takesList.size
   val winnerCount = takesList.count { it.result.equals("winner", ignoreCase = true) }
@@ -96,8 +99,8 @@ fun TakesScreen(viewModel: MainViewModel) {
 
     // Dual Export & Logbook Tools
     item {
-      var showImportModal by remember { mutableStateOf(false) }
-      var importJsonInput by remember { mutableStateOf("") }
+      var showImportModal by rememberSaveable { mutableStateOf(false) }
+      var importJsonInput by rememberSaveable { mutableStateOf("") }
 
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -108,9 +111,9 @@ fun TakesScreen(viewModel: MainViewModel) {
           colors = ButtonDefaults.outlinedButtonColors(contentColor = AmberGold),
           shape = RoundedCornerShape(8.dp),
           contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-          modifier = Modifier.weight(1f).height(38.dp).testTag("action_export_takes_text")
+          modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp).testTag("action_export_takes_text")
         ) {
-          Icon(Icons.Default.Article, contentDescription = null, tint = AmberGold, modifier = Modifier.size(14.dp))
+          Icon(Icons.AutoMirrored.Filled.Article, contentDescription = null, tint = AmberGold, modifier = Modifier.size(14.dp))
           Spacer(modifier = Modifier.width(4.dp))
           Text("Export Text", style = MaterialTheme.typography.labelSmall, color = AmberGold)
         }
@@ -272,12 +275,8 @@ private fun TakeItemCard(
   onDelete: () -> Unit,
   onCopy: () -> Unit
 ) {
-  var editingNote by remember { mutableStateOf(false) }
-  var noteInput by remember { mutableStateOf(take.nextChange) }
-
-  LaunchedEffect(take.nextChange) {
-    noteInput = take.nextChange
-  }
+  var editingNote by rememberSaveable(take.id) { mutableStateOf(false) }
+  var noteInput by rememberSaveable(take.id, take.nextChange) { mutableStateOf(take.nextChange) }
 
   val resultColor = when (take.result.lowercase()) {
     "winner" -> StudioWinner
@@ -403,14 +402,14 @@ private fun TakeItemCard(
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        IconButton(onClick = onDuplicate, modifier = Modifier.size(32.dp)) {
-          Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", tint = StudioCyan, modifier = Modifier.size(16.dp))
+        IconButton(onClick = onDuplicate, modifier = Modifier.minimumInteractiveComponentSize()) {
+          Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate take ${take.name}", tint = StudioCyan, modifier = Modifier.size(18.dp))
         }
-        IconButton(onClick = onCopy, modifier = Modifier.size(32.dp)) {
-          Icon(Icons.Default.Share, contentDescription = "Copy Take", tint = TextSecondary, modifier = Modifier.size(16.dp))
+        IconButton(onClick = onCopy, modifier = Modifier.minimumInteractiveComponentSize()) {
+          Icon(Icons.Default.Share, contentDescription = "Copy take ${take.name}", tint = TextSecondary, modifier = Modifier.size(18.dp))
         }
-        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-          Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = StudioMiss, modifier = Modifier.size(16.dp))
+        IconButton(onClick = onDelete, modifier = Modifier.minimumInteractiveComponentSize()) {
+          Icon(Icons.Default.DeleteOutline, contentDescription = "Delete take ${take.name}", tint = StudioMiss, modifier = Modifier.size(18.dp))
         }
       }
     }
@@ -423,14 +422,15 @@ private fun ResultPill(label: String, active: Boolean, activeColor: Color, onCli
     color = if (active) activeColor else StudioCardElevated,
     shape = RoundedCornerShape(4.dp),
     modifier = Modifier
+      .minimumInteractiveComponentSize()
       .clip(RoundedCornerShape(4.dp))
       .clickable { onClick() }
   ) {
     Text(
       text = label,
-      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
       color = if (active) Color.Black else TextMuted,
-      modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
     )
   }
 }

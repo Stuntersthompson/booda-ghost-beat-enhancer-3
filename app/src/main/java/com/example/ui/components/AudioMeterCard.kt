@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,23 +85,27 @@ fun AudioMeterCard(
             ) {
               Button(
                 onClick = { onBpmMultiplier(0.5) },
-                contentPadding = PaddingValues(2.dp),
-                shape = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                shape = RoundedCornerShape(6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = StudioBg),
                 modifier = Modifier
                   .weight(1f)
-                  .height(26.dp)
+                  .minimumInteractiveComponentSize()
+                  .defaultMinSize(minHeight = 36.dp)
+                  .testTag("action_bpm_half")
               ) {
                 Text("x0.5", style = MaterialTheme.typography.labelSmall, color = StudioCyan)
               }
               Button(
                 onClick = { onBpmMultiplier(2.0) },
-                contentPadding = PaddingValues(2.dp),
-                shape = RoundedCornerShape(4.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                shape = RoundedCornerShape(6.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = StudioBg),
                 modifier = Modifier
                   .weight(1f)
-                  .height(26.dp)
+                  .minimumInteractiveComponentSize()
+                  .defaultMinSize(minHeight = 36.dp)
+                  .testTag("action_bpm_double")
               ) {
                 Text("x2.0", style = MaterialTheme.typography.labelSmall, color = StudioCyan)
               }

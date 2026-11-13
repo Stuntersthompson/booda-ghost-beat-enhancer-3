@@ -84,14 +84,14 @@ fun PromptBox(
           IconButton(
             onClick = onCopy,
             modifier = Modifier
-              .size(32.dp)
+              .minimumInteractiveComponentSize()
               .testTag("copy_${title.lowercase().replace(" ", "_")}")
           ) {
             Icon(
               imageVector = Icons.Default.ContentCopy,
               contentDescription = "Copy $title",
               tint = TextSecondary,
-              modifier = Modifier.size(16.dp)
+              modifier = Modifier.size(18.dp)
             )
           }
         }

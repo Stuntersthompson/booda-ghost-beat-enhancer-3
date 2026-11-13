@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.StudioBottomBar
+import com.example.ui.components.StudioNavigationRail
 import com.example.ui.components.StudioSettingsDrawerSheet
 import com.example.ui.components.StudioTopBar
 import com.example.ui.screens.*
@@ -56,7 +58,7 @@ fun MainAppContent(viewModel: MainViewModel) {
   val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
   val jobType by viewModel.jobType.collectAsStateWithLifecycle()
 
-  var showLaneDialog by remember { mutableStateOf(false) }
+  var showLaneDialog by rememberSaveable { mutableStateOf(false) }
 
   // DrawerState uses rememberSaveable internally so open/closed state survives rotation & recreation
   val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -82,42 +84,57 @@ fun MainAppContent(viewModel: MainViewModel) {
       )
     }
   ) {
-    Scaffold(
-      modifier = Modifier.fillMaxSize(),
-      containerColor = StudioBg,
-      contentWindowInsets = WindowInsets(0, 0, 0, 0),
-      topBar = {
-        StudioTopBar(
-          activeLane = activeLane,
-          jobType = jobType,
-          onJobTypeChanged = { viewModel.setJobType(it) },
-          onLaneClick = { showLaneDialog = true },
-          onSettingsClick = {
-            coroutineScope.launch { drawerState.open() }
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+      val useNavRail = maxWidth >= 600.dp
+
+      Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = StudioBg,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+          StudioTopBar(
+            activeLane = activeLane,
+            jobType = jobType,
+            onJobTypeChanged = { viewModel.setJobType(it) },
+            onLaneClick = { showLaneDialog = true },
+            onSettingsClick = {
+              coroutineScope.launch { drawerState.open() }
+            }
+          )
+        },
+        bottomBar = {
+          if (!useNavRail) {
+            StudioBottomBar(
+              currentTab = currentTab,
+              onTabSelected = { viewModel.setTab(it) }
+            )
           }
-        )
-      },
-      bottomBar = {
-        StudioBottomBar(
-          currentTab = currentTab,
-          onTabSelected = { viewModel.setTab(it) }
-        )
-      }
-    ) { innerPadding ->
-      Box(
-        modifier = Modifier
-          .fillMaxSize()
-          .padding(innerPadding)
-      ) {
-        when (currentTab) {
-          StudioTab.ANALYZE -> AnalyzeScreen(viewModel)
-          StudioTab.STYLES -> StyleGeneratorScreen(viewModel)
-          StudioTab.LIBRARY -> LibraryScreen(viewModel)
-          StudioTab.BUILD -> BuildScreen(viewModel)
-          StudioTab.SIMPLE -> SimpleScreen(viewModel)
-          StudioTab.LANES -> LanesScreen(viewModel)
-          StudioTab.TAKES -> TakesScreen(viewModel)
-          StudioTab.ADVISOR -> AdvisorScreen(viewModel)
+        }
+      ) { innerPadding ->
+        Row(
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(innerPadding)
+        ) {
+          if (useNavRail) {
+            StudioNavigationRail(
+              currentTab = currentTab,
+              onTabSelected = { viewModel.setTab(it) }
+            )
+          }
+
+          Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            when (currentTab) {
+              StudioTab.ANALYZE -> AnalyzeScreen(viewModel)
+              StudioTab.STYLES -> StyleGeneratorScreen(viewModel)
+              StudioTab.LIBRARY -> LibraryScreen(viewModel)
+              StudioTab.BUILD -> BuildScreen(viewModel)
+              StudioTab.SIMPLE -> SimpleScreen(viewModel)
+              StudioTab.LANES -> LanesScreen(viewModel)
+              StudioTab.TAKES -> TakesScreen(viewModel)
+              StudioTab.ADVISOR -> AdvisorScreen(viewModel)
+            }
+          }
         }
       }
     }

@@ -400,4 +400,122 @@ class PromptBankRepository(private val context: Context) {
       )
     }
   }
+
+  /**
+   * Resolves BPM bounds, regional category, and catalog tier for any of the 41 studio lanes.
+   */
+  fun laneTempoProfile(lane: String): LaneTempoProfile {
+    val exp = expansionLanes.find { it.name.equals(lane, ignoreCase = true) }
+    if (exp != null) {
+      val (minBpm, maxBpm) = parseBpmRange(exp.tempoRange)
+      return LaneTempoProfile(
+        lane = exp.name,
+        bpmMin = minBpm,
+        bpmMax = maxBpm,
+        regionTag = exp.region,
+        isVerified = false
+      )
+    }
+    return VERIFIED_TEMPO_PROFILES[lane] ?: LaneTempoProfile(
+      lane = lane,
+      bpmMin = 120,
+      bpmMax = 148,
+      regionTag = "Studio Core",
+      isVerified = true
+    )
+  }
+
+  /**
+   * Ranks the closest lanes from all 41 lanes for a detected beat BPM.
+   */
+  fun rankLanesForBpm(bpm: Double, limit: Int = 5): List<LaneTempoMatch> {
+    val safeBpm = bpm.coerceIn(50.0, 210.0)
+    return allLanes.map { lane ->
+      val profile = laneTempoProfile(lane)
+      val mid = (profile.bpmMin + profile.bpmMax) / 2.0
+      val directDist = when {
+        safeBpm < profile.bpmMin -> profile.bpmMin - safeBpm
+        safeBpm > profile.bpmMax -> safeBpm - profile.bpmMax
+        else -> kotlin.math.abs(safeBpm - mid) * 0.25
+      }
+      val halfDist = kotlin.math.abs((safeBpm * 0.5) - mid) + 6.0
+      val doubleDist = kotlin.math.abs((safeBpm * 2.0) - mid) + 6.0
+      val bestScore = minOf(directDist, halfDist, doubleDist)
+      val matchNote = when {
+        safeBpm in profile.bpmMin.toDouble()..profile.bpmMax.toDouble() -> "Direct BPM Fit (${profile.bpmMin}-${profile.bpmMax})"
+        halfDist < directDist -> "Half-Time Fit (${profile.bpmMin}-${profile.bpmMax})"
+        doubleDist < directDist -> "Double-Time Fit (${profile.bpmMin}-${profile.bpmMax})"
+        else -> "${profile.bpmMin}-${profile.bpmMax} BPM"
+      }
+      LaneTempoMatch(
+        profile = profile,
+        distance = bestScore,
+        matchNote = matchNote
+      )
+    }
+      .sortedBy { it.distance }
+      .take(limit)
+  }
+
+  fun matchesBpmBracket(lane: String, bracket: String): Boolean {
+    if (bracket == "Any BPM") return true
+    val p = laneTempoProfile(lane)
+    val mid = (p.bpmMin + p.bpmMax) / 2
+    return when (bracket) {
+      "< 100" -> p.bpmMin < 100
+      "100-128" -> p.bpmMax >= 100 && p.bpmMin <= 128
+      "128+" -> p.bpmMax >= 128 || mid >= 128
+      else -> true
+    }
+  }
+
+  companion object {
+    private val VERIFIED_TEMPO_PROFILES: Map<String, LaneTempoProfile> = mapOf(
+      "Trap" to LaneTempoProfile("Trap", 128, 152, "Atlanta / Core", true),
+      "Chiraq drill" to LaneTempoProfile("Chiraq drill", 132, 150, "Chicago", true),
+      "UK drill" to LaneTempoProfile("UK drill", 136, 146, "London / UK", true),
+      "NY drill" to LaneTempoProfile("NY drill", 138, 152, "New York", true),
+      "Boom bap" to LaneTempoProfile("Boom bap", 82, 98, "90s Classic", true),
+      "Boom bap revival / conscious" to LaneTempoProfile("Boom bap revival / conscious", 80, 96, "Conscious", true),
+      "Detroit trap" to LaneTempoProfile("Detroit trap", 142, 168, "Detroit", true),
+      "West Coast / G-funk" to LaneTempoProfile("West Coast / G-funk", 88, 105, "West Coast", true),
+      "Memphis phonk / dark trap" to LaneTempoProfile("Memphis phonk / dark trap", 118, 145, "Memphis", true),
+      "Gospel trap" to LaneTempoProfile("Gospel trap", 124, 148, "Sanctuary", true),
+      "Cloud rap / dreamo" to LaneTempoProfile("Cloud rap / dreamo", 110, 136, "Atmospheric", true),
+      "Trap soul" to LaneTempoProfile("Trap soul", 95, 126, "Late Night R&B", true),
+      "Jersey club rap" to LaneTempoProfile("Jersey club rap", 134, 150, "Newark / East", true),
+      "Plugg" to LaneTempoProfile("Plugg", 128, 148, "Atlanta / Plugg", true),
+      "Pluggnb" to LaneTempoProfile("Pluggnb", 122, 144, "Melodic Plugg", true),
+      "Rage" to LaneTempoProfile("Rage", 136, 160, "Hyper / Synth", true),
+      "Horrorcore" to LaneTempoProfile("Horrorcore", 100, 138, "Dark / Experimental", true),
+      "Soul-sample hip-hop" to LaneTempoProfile("Soul-sample hip-hop", 82, 104, "MPC Soul", true),
+      "Down South / Southern trap" to LaneTempoProfile("Down South / Southern trap", 120, 144, "South", true),
+      "East Coast" to LaneTempoProfile("East Coast", 85, 102, "NYC / East", true),
+      "Jazz rap / lo-fi" to LaneTempoProfile("Jazz rap / lo-fi", 74, 94, "Lo-Fi / Jazz", true)
+    )
+
+    fun parseBpmRange(rangeStr: String): Pair<Int, Int> {
+      val nums = Regex("\\d+").findAll(rangeStr).mapNotNull { it.value.toIntOrNull() }.toList()
+      return when {
+        nums.size >= 2 -> Pair(nums[0].coerceAtMost(nums[1]), maxOf(nums[0], nums[1]))
+        nums.size == 1 -> Pair(nums[0], nums[0] + 15)
+        else -> Pair(120, 145)
+      }
+    }
+  }
 }
+
+data class LaneTempoProfile(
+  val lane: String,
+  val bpmMin: Int,
+  val bpmMax: Int,
+  val regionTag: String,
+  val isVerified: Boolean
+)
+
+data class LaneTempoMatch(
+  val profile: LaneTempoProfile,
+  val distance: Double,
+  val matchNote: String
+)
+

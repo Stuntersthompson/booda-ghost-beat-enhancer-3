@@ -14,6 +14,7 @@ import com.example.ai.GeminiBeatService
 import com.example.audio.AudioAnalysisResult
 import com.example.audio.AudioAnalyzer
 import com.example.audio.AudioRecorder
+import com.example.audio.StudioAudioPlayer
 import com.example.data.db.AppDatabase
 import com.example.data.model.*
 import com.example.data.repository.FavoriteRepository
@@ -48,7 +49,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   val preferencesRepo = StudioPreferencesRepository(application)
   private val audioAnalyzer = AudioAnalyzer(application)
   private val audioRecorder = AudioRecorder()
+  private val audioPlayer = StudioAudioPlayer(viewModelScope)
   private val geminiService = GeminiBeatService()
+
+  // Synced Waveform Playback State
+  val isPlayingAudio: StateFlow<Boolean> = audioPlayer.isPlaying
+  val playbackProgress: StateFlow<Float> = audioPlayer.progress
+  val playbackPositionMs: StateFlow<Long> = audioPlayer.positionMs
+  val playbackDurationMs: StateFlow<Long> = audioPlayer.durationMs
+  val hasPlayableAudio: StateFlow<Boolean> = audioPlayer.hasAudio
+  val isLoopingAudio: StateFlow<Boolean> = audioPlayer.isLooping
 
   // Studio Visualizer Preferences
   val visualizerSensitivity: StateFlow<Float> = preferencesRepo.visualizerSensitivity
@@ -340,6 +350,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   // Audio Actions
   fun startRecording() {
     if (_isRecording.value) return
+    audioPlayer.stop()
     val started = audioRecorder.startRecording { peak, db ->
       _recordingPeak.value = peak
       _recordingDb.value = db
@@ -366,6 +377,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _isRecording.value = false
         if (samples.isNotEmpty()) {
+          audioPlayer.loadPcm(samples, 44100)
           _isAnalyzing.value = true
           val result = audioAnalyzer.analyzeRecordedSamples("Live Mic Recording", samples)
           _audioAnalysis.value = result
@@ -385,13 +397,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   fun analyzeFile(uri: Uri, fileName: String) {
     viewModelScope.launch {
+      audioPlayer.stop()
       _isAnalyzing.value = true
       val result = audioAnalyzer.analyzeAudioUri(uri, fileName)
       _audioAnalysis.value = result
+      val fallbackMs = (result.durationSec * 1000.0).toLong().coerceAtLeast(1000L)
+      audioPlayer.loadUri(getApplication(), uri, fallbackMs)
       _isAnalyzing.value = false
       val consultation = geminiService.consultBeatAnalyst(result, _jobType.value.value)
       _aiConsultation.value = consultation
     }
+  }
+
+  fun togglePlayPauseAudio() {
+    if (_isRecording.value) return
+    audioPlayer.togglePlayPause()
+  }
+
+  fun stopAudioPlayback() {
+    audioPlayer.stop()
+  }
+
+  fun seekAudioToFraction(fraction: Float) {
+    if (_isRecording.value) return
+    audioPlayer.seekToFraction(fraction)
+  }
+
+  fun toggleAudioLoop() {
+    audioPlayer.toggleLoop()
+  }
+
+  fun applyBpmMatchedLanePreset(lane: String, overrideBpm: Double? = null) {
+    _activeLane.value = lane
+    val drums = bankRepo.laneDrums(lane)
+    val analyzed = _audioAnalysis.value
+    val bpmValue = overrideBpm ?: analyzed?.bpm
+    val bpmTag = bpmValue?.toInt()?.let { " at $it BPM" } ?: ""
+    val keyTag = analyzed?.keyName?.takeIf { it.isNotBlank() }?.let { " in $it" } ?: ""
+
+    if (_jobType.value == JobType.PRESERVE) {
+      _stylePrompt.value = "$LOCK_LINE. Add $lane drums underneath only ($drums)$bpmTag$keyTag, spice only, sample stays lead."
+      _variety.value = 0
+      _weirdness.value = 25
+      _styleInfluence.value = 70
+      _audioInfluence.value = 80
+    } else {
+      _stylePrompt.value = "$lane instrumental$bpmTag$keyTag, $drums, high energy, crisp mix."
+      _variety.value = 0
+      _weirdness.value = 20
+      _styleInfluence.value = 65
+      _audioInfluence.value = 0
+    }
+    _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value)
+    updateSimplePrompt()
+    resetHandoffSteps()
   }
 
   fun adjustBpmMultiplier(multiplier: Double) {
@@ -748,5 +807,12 @@ ${_lyricsMap.value}
       Toast.makeText(context, "Imported $count favorite prompt(s)", Toast.LENGTH_SHORT).show()
     }
   }
+
+  override fun onCleared() {
+    super.onCleared()
+    audioRecorder.stopRecording()
+    audioPlayer.release()
+  }
 }
+
 

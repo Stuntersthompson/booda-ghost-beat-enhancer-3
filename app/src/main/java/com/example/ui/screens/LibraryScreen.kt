@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.StylePrompt
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
@@ -30,9 +31,9 @@ import com.example.viewmodel.MainViewModel
 @Composable
 fun LibraryScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
-  val query by viewModel.libraryQuery.collectAsState()
-  val filterTrack by viewModel.libraryFilterTrack.collectAsState()
-  val filterLane by viewModel.libraryFilterLane.collectAsState()
+  val query by viewModel.libraryQuery.collectAsStateWithLifecycle()
+  val filterTrack by viewModel.libraryFilterTrack.collectAsStateWithLifecycle()
+  val filterLane by viewModel.libraryFilterLane.collectAsStateWithLifecycle()
 
   val allStyles = viewModel.bankRepo.stylePrompts
   val verifiedLanes = viewModel.bankRepo.verifiedLanes
@@ -211,7 +212,7 @@ fun LibraryScreen(viewModel: MainViewModel) {
     }
 
     // Prompt Items
-    items(filteredPrompts) { prompt ->
+    items(filteredPrompts, key = { it.id }) { prompt ->
       PromptCardItem(prompt = prompt) {
         viewModel.copyToClipboard(context, "Prompt #${prompt.id}", prompt.text)
       }
@@ -262,8 +263,11 @@ private fun PromptCardItem(prompt: StylePrompt, onCopy: () -> Unit) {
             color = TextMuted
           )
           Spacer(modifier = Modifier.width(4.dp))
-          IconButton(onClick = onCopy, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = TextSecondary, modifier = Modifier.size(14.dp))
+          IconButton(
+            onClick = onCopy,
+            modifier = Modifier.minimumInteractiveComponentSize()
+          ) {
+            Icon(Icons.Default.ContentCopy, contentDescription = "Copy prompt #${prompt.id}", tint = TextSecondary, modifier = Modifier.size(16.dp))
           }
         }
       }

@@ -326,4 +326,79 @@ class ExampleUnitTest {
     tracker.update(rawAmp, sensitivity = 1.0f, currentTimeMs = 1000L)
     assertEquals(0.20f, tracker.peakAmplitudes[0], 0.001f)
   }
+
+  @Test
+  fun test_peak_hold_disabled_clears_and_skips_tracking() {
+    val tracker = PeakHoldTracker(maxCapacity = 6)
+
+    // Populate peaks while enabled
+    tracker.update(
+      amplitudes = listOf(0.85f, 0.92f),
+      sensitivity = 1.0f,
+      peakHoldEnabled = true,
+      currentTimeMs = 2000L
+    )
+    assertTrue(tracker.hasActivePeaks())
+    assertEquals(0.85f, tracker.peakAmplitudes[0], 0.001f)
+
+    // Toggle OFF: must clear all state and skip new updates
+    tracker.update(
+      amplitudes = listOf(0.99f, 0.99f),
+      sensitivity = 2.0f,
+      peakHoldEnabled = false,
+      currentTimeMs = 2016L
+    )
+    assertFalse("Active peaks must clear when peakHoldEnabled = false", tracker.hasActivePeaks())
+    for (i in 0 until tracker.maxCapacity) {
+      assertEquals(0f, tracker.peakAmplitudes[i], 0.0001f)
+      assertEquals(0L, tracker.peakHoldUntilMs[i])
+      assertEquals(0f, tracker.peakVelocities[i], 0.0001f)
+    }
+  }
+
+  @Test
+  fun test_playback_math_progress_seek_and_formatting() {
+    // Normalized progress clamping
+    assertEquals(0f, com.example.audio.PlaybackMath.computeNormalizedProgress(500L, 0L), 0.0001f)
+    assertEquals(0.5f, com.example.audio.PlaybackMath.computeNormalizedProgress(15000L, 30000L), 0.0001f)
+    assertEquals(1f, com.example.audio.PlaybackMath.computeNormalizedProgress(45000L, 30000L), 0.0001f)
+
+    // Seek target ms with NaN and out-of-range guards
+    assertEquals(0L, com.example.audio.PlaybackMath.computeSeekTargetMs(Float.NaN, 20000L))
+    assertEquals(0L, com.example.audio.PlaybackMath.computeSeekTargetMs(-0.4f, 20000L))
+    assertEquals(10000L, com.example.audio.PlaybackMath.computeSeekTargetMs(0.5f, 20000L))
+    assertEquals(20000L, com.example.audio.PlaybackMath.computeSeekTargetMs(1.8f, 20000L))
+
+    // PCM sample index bounds
+    assertEquals(0, com.example.audio.PlaybackMath.computePcmSampleIndex(Float.NaN, 1000))
+    assertEquals(500, com.example.audio.PlaybackMath.computePcmSampleIndex(0.5f, 1001))
+    assertEquals(999, com.example.audio.PlaybackMath.computePcmSampleIndex(1.5f, 1000))
+
+    // Duration formatter
+    assertEquals("0:00", com.example.audio.PlaybackMath.formatDurationMmSs(-50L))
+    assertEquals("0:09", com.example.audio.PlaybackMath.formatDurationMmSs(9000L))
+    assertEquals("1:05", com.example.audio.PlaybackMath.formatDurationMmSs(65000L))
+  }
+
+  @Test
+  fun test_sensitivity_step_snapping_and_bpm_range_parsing() {
+    assertEquals(1.0f, StudioPreferencesRepository.snapSensitivityStep(1.02f), 0.001f)
+    assertEquals(1.05f, StudioPreferencesRepository.snapSensitivityStep(1.03f), 0.001f)
+    assertEquals(0.25f, StudioPreferencesRepository.snapSensitivityStep(0.05f), 0.001f)
+    assertEquals(4.0f, StudioPreferencesRepository.snapSensitivityStep(9.0f), 0.001f)
+
+    assertEquals(Pair(130, 145), com.example.data.repository.PromptBankRepository.parseBpmRange("130-145 BPM"))
+    assertEquals(Pair(95, 110), com.example.data.repository.PromptBankRepository.parseBpmRange("95 BPM"))
+    assertEquals(Pair(120, 145), com.example.data.repository.PromptBankRepository.parseBpmRange("unparsed"))
+  }
+
+  @Test
+  fun test_lane_accent_color_resolution_and_fallback() {
+    assertNull(com.example.ui.components.resolveLaneAccentColor(""))
+    assertNull(com.example.ui.components.resolveLaneAccentColor("Unknown Hybrid Genre"))
+    assertNotNull(com.example.ui.components.resolveLaneAccentColor("Gospel trap"))
+    assertNotNull(com.example.ui.components.resolveLaneAccentColor("NY drill"))
+    assertNotNull(com.example.ui.components.resolveLaneAccentColor("Boom bap"))
+    assertNotNull(com.example.ui.components.resolveLaneAccentColor("Detroit trap"))
+  }
 }

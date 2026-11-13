@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.JobType
 import com.example.data.model.LOCK_LINE
 import com.example.ui.theme.*
@@ -22,10 +23,10 @@ import com.example.viewmodel.MainViewModel
 
 @Composable
 fun AdvisorScreen(viewModel: MainViewModel) {
-  val jobType by viewModel.jobType.collectAsState()
-  val stylePrompt by viewModel.stylePrompt.collectAsState()
-  val lyricsMap by viewModel.lyricsMap.collectAsState()
-  val excludeText by viewModel.excludeText.collectAsState()
+  val jobType by viewModel.jobType.collectAsStateWithLifecycle()
+  val stylePrompt by viewModel.stylePrompt.collectAsStateWithLifecycle()
+  val lyricsMap by viewModel.lyricsMap.collectAsStateWithLifecycle()
+  val excludeText by viewModel.excludeText.collectAsStateWithLifecycle()
 
   val isPreserve = jobType == JobType.PRESERVE
   val hasLockLine = stylePrompt.contains(LOCK_LINE)
@@ -34,32 +35,111 @@ fun AdvisorScreen(viewModel: MainViewModel) {
     stylePrompt.contains(it, ignoreCase = true)
   }
 
-  LazyColumn(
+  BoxWithConstraints(
     modifier = Modifier
       .fillMaxSize()
       .background(StudioBg)
-      .padding(horizontal = 14.dp),
-    contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
-    verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
-    // Header
-    item {
-      Column {
-        Text(
-          text = "SUNO V6 ADVISOR & AUDITOR",
-          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-          color = AmberGold
-        )
-        Text(
-          text = "Real-time compliance auditor and official engineering guide for Suno v6 beat enhancement.",
-          style = MaterialTheme.typography.bodyMedium,
-          color = TextSecondary
-        )
+    val isWideLayout = maxWidth >= 760.dp
+
+    if (isWideLayout) {
+      Row(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+      ) {
+        LazyColumn(
+          modifier = Modifier.weight(0.9f).fillMaxHeight(),
+          contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
+          verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+          item {
+            Column {
+              Text(
+                text = "SUNO V6 ADVISOR & AUDITOR",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = AmberGold
+              )
+              Text(
+                text = "Real-time compliance auditor and official engineering guide for Suno v6 beat enhancement.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary
+              )
+            }
+          }
+          item {
+            LiveAuditReportCard(
+              isPreserve = isPreserve,
+              hasLockLine = hasLockLine,
+              hasEnd = hasEnd,
+              hasNegativeInStyle = hasNegativeInStyle,
+              stylePromptLength = stylePrompt.length,
+              lyricsMapLength = lyricsMap.length,
+              excludeTextLength = excludeText.length
+            )
+          }
+        }
+
+        LazyColumn(
+          modifier = Modifier.weight(1.1f).fillMaxHeight(),
+          contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
+          verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+          item { OfficialLawsCard() }
+          item { CreditsLimitsCard() }
+          item { TroubleshootingCard() }
+        }
+      }
+    } else {
+      LazyColumn(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(horizontal = 14.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+      ) {
+        item {
+          Column {
+            Text(
+              text = "SUNO V6 ADVISOR & AUDITOR",
+              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+              color = AmberGold
+            )
+            Text(
+              text = "Real-time compliance auditor and official engineering guide for Suno v6 beat enhancement.",
+              style = MaterialTheme.typography.bodyMedium,
+              color = TextSecondary
+            )
+          }
+        }
+        item {
+          LiveAuditReportCard(
+            isPreserve = isPreserve,
+            hasLockLine = hasLockLine,
+            hasEnd = hasEnd,
+            hasNegativeInStyle = hasNegativeInStyle,
+            stylePromptLength = stylePrompt.length,
+            lyricsMapLength = lyricsMap.length,
+            excludeTextLength = excludeText.length
+          )
+        }
+        item { OfficialLawsCard() }
+        item { CreditsLimitsCard() }
+        item { TroubleshootingCard() }
       }
     }
+  }
+}
 
-    // Active Prompt Audit Report
-    item {
+@Composable
+private fun LiveAuditReportCard(
+  isPreserve: Boolean,
+  hasLockLine: Boolean,
+  hasEnd: Boolean,
+  hasNegativeInStyle: Boolean,
+  stylePromptLength: Int,
+  lyricsMapLength: Int,
+  excludeTextLength: Int
+) {
       Surface(
         color = StudioCard,
         shape = RoundedCornerShape(12.dp),
@@ -93,15 +173,15 @@ fun AdvisorScreen(viewModel: MainViewModel) {
 
           AuditCheckItem(
             label = "Character Caps Compliance",
-            passed = stylePrompt.length <= 1000 && lyricsMap.length <= 5000 && excludeText.length <= 1000,
-            detail = "Style ${stylePrompt.length}/1000 · Lyrics ${lyricsMap.length}/5000 · Exclude ${excludeText.length}/1000"
+            passed = stylePromptLength <= 1000 && lyricsMapLength <= 5000 && excludeTextLength <= 1000,
+            detail = "Style $stylePromptLength/1000 · Lyrics $lyricsMapLength/5000 · Exclude $excludeTextLength/1000"
           )
         }
       }
-    }
+}
 
-    // Official Rules & Tested Recipes
-    item {
+@Composable
+private fun OfficialLawsCard() {
       Surface(
         color = StudioCard,
         shape = RoundedCornerShape(12.dp),
@@ -140,10 +220,10 @@ fun AdvisorScreen(viewModel: MainViewModel) {
           )
         }
       }
-    }
+}
 
-    // Credits, Upload Limits & Slider Semantics
-    item {
+@Composable
+private fun CreditsLimitsCard() {
       Surface(
         color = StudioCard,
         shape = RoundedCornerShape(12.dp),
@@ -178,10 +258,10 @@ fun AdvisorScreen(viewModel: MainViewModel) {
           )
         }
       }
-    }
+}
 
-    // Common Fixes Flowchart
-    item {
+@Composable
+private fun TroubleshootingCard() {
       Surface(
         color = StudioCard,
         shape = RoundedCornerShape(12.dp),
@@ -216,8 +296,6 @@ fun AdvisorScreen(viewModel: MainViewModel) {
           )
         }
       }
-    }
-  }
 }
 
 @Composable

@@ -10,9 +10,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,9 +29,12 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.audio.PlaybackMath
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 
@@ -237,6 +245,8 @@ fun RealtimeWaveformVisualizer(
   isLiveRecording: Boolean,
   sensitivityProvider: () -> Float = { WAVEFORM_DEFAULT_SENSITIVITY },
   peakHoldEnabledProvider: () -> Boolean = { true },
+  playheadProgressProvider: (() -> Float)? = null,
+  onSeek: ((Float) -> Unit)? = null,
   activeLane: String = "",
   beatResetKey: Any? = null,
   currentPeakDb: Float = -60f,
@@ -245,7 +255,7 @@ fun RealtimeWaveformVisualizer(
   durationSec: Double = 0.0,
   modifier: Modifier = Modifier
 ) {
-  var visualizerStyle by remember { mutableStateOf(WaveformStyle.MIRRORED_GLOW) }
+  var visualizerStyle by rememberSaveable { mutableStateOf(WaveformStyle.MIRRORED_GLOW) }
   val inspectPositionXState = remember { mutableStateOf<Float?>(null) }
   val peakTracker = remember { PeakHoldTracker(MAX_WAVEFORM_BARS) }
   val frameTickState = remember { mutableLongStateOf(0L) }
@@ -338,42 +348,51 @@ fun RealtimeWaveformVisualizer(
         // Style Switcher Buttons
         Row(
           modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(StudioBg)
             .padding(2.dp),
           horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
           IconButton(
             onClick = { visualizerStyle = WaveformStyle.MIRRORED_GLOW },
-            modifier = Modifier.size(26.dp).testTag("style_mirrored_glow")
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .size(34.dp)
+              .testTag("style_mirrored_glow")
           ) {
             Icon(
               imageVector = Icons.Default.Equalizer,
-              contentDescription = "Mirrored Glow",
+              contentDescription = "Mirrored Glow waveform style",
               tint = if (visualizerStyle == WaveformStyle.MIRRORED_GLOW) AmberGold else TextMuted,
-              modifier = Modifier.size(14.dp)
+              modifier = Modifier.size(16.dp)
             )
           }
           IconButton(
             onClick = { visualizerStyle = WaveformStyle.BARS },
-            modifier = Modifier.size(26.dp).testTag("style_bars")
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .size(34.dp)
+              .testTag("style_bars")
           ) {
             Icon(
               imageVector = Icons.Default.GraphicEq,
-              contentDescription = "Bars",
+              contentDescription = "Standard bars waveform style",
               tint = if (visualizerStyle == WaveformStyle.BARS) StudioCyan else TextMuted,
-              modifier = Modifier.size(14.dp)
+              modifier = Modifier.size(16.dp)
             )
           }
           IconButton(
             onClick = { visualizerStyle = WaveformStyle.OSCILLOSCOPE },
-            modifier = Modifier.size(26.dp).testTag("style_oscilloscope")
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .size(34.dp)
+              .testTag("style_oscilloscope")
           ) {
             Icon(
               imageVector = Icons.Default.Timeline,
-              contentDescription = "Oscilloscope",
+              contentDescription = "Oscilloscope waveform style",
               tint = if (visualizerStyle == WaveformStyle.OSCILLOSCOPE) StudioWinner else TextMuted,
-              modifier = Modifier.size(14.dp)
+              modifier = Modifier.size(16.dp)
             )
           }
         }
@@ -389,15 +408,36 @@ fun RealtimeWaveformVisualizer(
           .clip(RoundedCornerShape(8.dp))
           .background(StudioBg)
           .border(0.5.dp, StudioBorder, RoundedCornerShape(8.dp))
-          .pointerInput(Unit) {
+          .semantics {
+            contentDescription = if (onSeek != null) {
+              "Interactive audio waveform. Tap or drag horizontally to scrub playback position."
+            } else {
+              "Real-time audio waveform visualizer."
+            }
+          }
+          .pointerInput(onSeek) {
             detectTapGestures(
-              onTap = { offset -> inspectPositionXState.value = offset.x },
-              onPress = { inspectPositionXState.value = it.x }
+              onTap = { offset ->
+                inspectPositionXState.value = offset.x
+                if (onSeek != null && size.width > 0) {
+                  onSeek((offset.x / size.width.toFloat()).coerceIn(0f, 1f))
+                }
+              },
+              onPress = { offset ->
+                inspectPositionXState.value = offset.x
+                if (onSeek != null && size.width > 0) {
+                  onSeek((offset.x / size.width.toFloat()).coerceIn(0f, 1f))
+                }
+              }
             )
           }
-          .pointerInput(Unit) {
+          .pointerInput(onSeek) {
             detectDragGestures { change, _ ->
+              change.consume()
               inspectPositionXState.value = change.position.x
+              if (onSeek != null && size.width > 0) {
+                onSeek((change.position.x / size.width.toFloat()).coerceIn(0f, 1f))
+              }
             }
           }
           .drawWithCache {
@@ -491,6 +531,8 @@ fun RealtimeWaveformVisualizer(
             val capGlowClip = clipEdgeColor.copy(alpha = 0.42f)
             val oscGlowColor = (if (isLiveRecording) StudioMiss else highEdgeColor).copy(alpha = 0.3f)
             val oscLineColor = if (isLiveRecording) StudioMiss else centerColor
+            val playheadGlowColor = Color.White.copy(alpha = 0.28f)
+            val playheadLineColor = Color.White
 
             val oscPath = Path()
             val oscGlowStroke = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round)
@@ -726,22 +768,44 @@ fun RealtimeWaveformVisualizer(
                 }
               }
 
-              // 4. Inspection Cursor if tapped
-              val tapX = inspectPositionXState.value
-              if (tapX != null) {
-                val clampedX = tapX.coerceIn(0f, canvasWidth)
+              // 4. Synced Playback Playhead OR Inspection Cursor
+              val activeProgress = playheadProgressProvider?.invoke()
+              if (!isLiveRecording && activeProgress != null) {
+                val playX = (activeProgress.coerceIn(0f, 1f) * canvasWidth).coerceIn(0f, canvasWidth)
                 drawLine(
-                  color = Color.White,
-                  start = Offset(clampedX, 0f),
-                  end = Offset(clampedX, canvasHeight),
-                  strokeWidth = 1.5f,
-                  pathEffect = cursorDashEffect
+                  color = playheadGlowColor,
+                  start = Offset(playX, 0f),
+                  end = Offset(playX, canvasHeight),
+                  strokeWidth = 6f
+                )
+                drawLine(
+                  color = playheadLineColor,
+                  start = Offset(playX, 0f),
+                  end = Offset(playX, canvasHeight),
+                  strokeWidth = 2f
                 )
                 drawCircle(
                   color = highEdgeColor,
-                  radius = 4f,
-                  center = Offset(clampedX, centerY)
+                  radius = 4.5f,
+                  center = Offset(playX, centerY)
                 )
+              } else {
+                val tapX = inspectPositionXState.value
+                if (tapX != null) {
+                  val clampedX = tapX.coerceIn(0f, canvasWidth)
+                  drawLine(
+                    color = Color.White,
+                    start = Offset(clampedX, 0f),
+                    end = Offset(clampedX, canvasHeight),
+                    strokeWidth = 1.5f,
+                    pathEffect = cursorDashEffect
+                  )
+                  drawCircle(
+                    color = highEdgeColor,
+                    radius = 4f,
+                    center = Offset(clampedX, centerY)
+                  )
+                }
               }
             }
           }
@@ -819,6 +883,8 @@ fun CompactWaveformMeter(
   amplitudesProvider: () -> FloatArray,
   sensitivityProvider: () -> Float = { WAVEFORM_DEFAULT_SENSITIVITY },
   peakHoldEnabledProvider: () -> Boolean = { true },
+  playheadProgressProvider: (() -> Float)? = null,
+  onSeek: ((Float) -> Unit)? = null,
   activeLane: String = "",
   beatResetKey: Any? = null,
   modifier: Modifier = Modifier
@@ -849,6 +915,33 @@ fun CompactWaveformMeter(
       .clip(RoundedCornerShape(6.dp))
       .background(StudioBg)
       .border(0.5.dp, StudioBorder, RoundedCornerShape(6.dp))
+      .then(
+        if (onSeek != null) {
+          Modifier
+            .semantics {
+              contentDescription = "Compact groove waveform meter. Tap or drag to scrub playback."
+            }
+            .pointerInput(onSeek) {
+              detectTapGestures(
+                onTap = { offset ->
+                  if (size.width > 0) {
+                    onSeek((offset.x / size.width.toFloat()).coerceIn(0f, 1f))
+                  }
+                }
+              )
+            }
+            .pointerInput(onSeek) {
+              detectDragGestures { change, _ ->
+                change.consume()
+                if (size.width > 0) {
+                  onSeek((change.position.x / size.width.toFloat()).coerceIn(0f, 1f))
+                }
+              }
+            }
+        } else {
+          Modifier
+        }
+      )
       .drawWithCache {
         val canvasWidth = size.width
         val canvasHeight = size.height
@@ -1018,8 +1111,134 @@ fun CompactWaveformMeter(
               }
             }
           }
+
+          val activeProgress = playheadProgressProvider?.invoke()
+          if (activeProgress != null) {
+            val playX = (activeProgress.coerceIn(0f, 1f) * canvasWidth).coerceIn(0f, canvasWidth)
+            drawLine(
+              color = capLineColor,
+              start = Offset(playX, 0f),
+              end = Offset(playX, canvasHeight),
+              strokeWidth = 2f
+            )
+          }
         }
       }
       .testTag("compact_waveform_meter")
   ) {}
 }
+
+/**
+ * Accessible Transport Bar synced with waveform playback & scrubbing.
+ */
+@Composable
+fun WaveformTransportBar(
+  isPlaying: Boolean,
+  isLooping: Boolean,
+  positionMs: Long,
+  durationMs: Long,
+  progress: Float,
+  onTogglePlayPause: () -> Unit,
+  onStop: () -> Unit,
+  onToggleLoop: () -> Unit,
+  onSeekFraction: (Float) -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Surface(
+    color = StudioCard,
+    shape = RoundedCornerShape(12.dp),
+    modifier = modifier
+      .fillMaxWidth()
+      .border(1.dp, StudioBorder, RoundedCornerShape(12.dp))
+      .testTag("waveform_transport_bar")
+  ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          FilledIconButton(
+            onClick = onTogglePlayPause,
+            colors = IconButtonDefaults.filledIconButtonColors(
+              containerColor = if (isPlaying) AmberGold else StudioCyan,
+              contentColor = Color.Black
+            ),
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .size(40.dp)
+              .testTag("action_transport_play_pause")
+          ) {
+            Icon(
+              imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+              contentDescription = if (isPlaying) "Pause audio playback" else "Play audio playback"
+            )
+          }
+
+          IconButton(
+            onClick = onStop,
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .testTag("action_transport_stop")
+          ) {
+            Icon(
+              imageVector = Icons.Default.Stop,
+              contentDescription = "Stop playback and reset playhead",
+              tint = TextSecondary
+            )
+          }
+
+          IconButton(
+            onClick = onToggleLoop,
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .testTag("action_transport_loop")
+          ) {
+            Icon(
+              imageVector = Icons.Default.Repeat,
+              contentDescription = if (isLooping) "Disable loop playback" else "Enable loop playback",
+              tint = if (isLooping) AmberGold else TextMuted
+            )
+          }
+        }
+
+        Surface(
+          color = StudioBg,
+          shape = RoundedCornerShape(6.dp),
+          modifier = Modifier.border(0.5.dp, StudioBorder, RoundedCornerShape(6.dp))
+        ) {
+          Text(
+            text = "${PlaybackMath.formatDurationMmSs(positionMs)} / ${PlaybackMath.formatDurationMmSs(durationMs)}",
+            style = MonospaceMetric.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold),
+            color = StudioCyan,
+            modifier = Modifier
+              .padding(horizontal = 10.dp, vertical = 5.dp)
+              .testTag("transport_time_readout")
+          )
+        }
+      }
+
+      Slider(
+        value = progress.coerceIn(0f, 1f),
+        onValueChange = { onSeekFraction(it) },
+        valueRange = 0f..1f,
+        colors = SliderDefaults.colors(
+          thumbColor = AmberGold,
+          activeTrackColor = StudioCyan,
+          inactiveTrackColor = StudioBg
+        ),
+        modifier = Modifier
+          .fillMaxWidth()
+          .semantics {
+            contentDescription = "Audio playback scrubber. Current time ${PlaybackMath.formatDurationMmSs(positionMs)} of ${PlaybackMath.formatDurationMmSs(durationMs)}"
+          }
+          .testTag("transport_scrub_slider")
+      )
+    }
+  }
+}
+

@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.JobType
 import com.example.data.model.LOCK_LINE
 import com.example.data.model.SIMPLE_WORKING_LIMIT
@@ -32,9 +33,9 @@ import com.example.viewmodel.MainViewModel
 @Composable
 fun SimpleScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
-  val jobType by viewModel.jobType.collectAsState()
-  val activeLane by viewModel.activeLane.collectAsState()
-  val simplePrompt by viewModel.simplePrompt.collectAsState()
+  val jobType by viewModel.jobType.collectAsStateWithLifecycle()
+  val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
+  val simplePrompt by viewModel.simplePrompt.collectAsStateWithLifecycle()
 
   val isPreserve = jobType == JobType.PRESERVE
   val chars = simplePrompt.length
@@ -108,7 +109,7 @@ fun SimpleScreen(viewModel: MainViewModel) {
           horizontalArrangement = Arrangement.spacedBy(6.dp),
           modifier = Modifier.fillMaxWidth()
         ) {
-          items(remixTemplates) { rt ->
+          items(remixTemplates, key = { it.id }) { rt ->
             Surface(
               color = StudioCardElevated,
               shape = RoundedCornerShape(14.dp),
@@ -177,9 +178,9 @@ fun SimpleScreen(viewModel: MainViewModel) {
 
             IconButton(
               onClick = { viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt) },
-              modifier = Modifier.size(32.dp).testTag("action_copy_simple")
+              modifier = Modifier.minimumInteractiveComponentSize().testTag("action_copy_simple")
             ) {
-              Icon(Icons.Default.ContentCopy, contentDescription = "Copy Simple Prompt", tint = TextSecondary, modifier = Modifier.size(16.dp))
+              Icon(Icons.Default.ContentCopy, contentDescription = "Copy Simple Prompt", tint = TextSecondary, modifier = Modifier.size(18.dp))
             }
           }
 

@@ -393,6 +393,79 @@ class ExampleRobolectricTest {
 
     repo3.setVisualizerSensitivity(-2.0f)
     assertEquals("Should clamp low values to 0.25f", 0.25f, repo3.visualizerSensitivity.value, 0.001f)
+
+    // Verify peakHoldEnabled default ON and persistence across re-instantiation
+    assertTrue("peakHoldEnabled should default to true", repo3.peakHoldEnabled.value)
+    repo3.setPeakHoldEnabled(false)
+    assertFalse(repo3.peakHoldEnabled.value)
+
+    val repo4 = StudioPreferencesRepository(context)
+    assertFalse("peakHoldEnabled=false must survive reload", repo4.peakHoldEnabled.value)
+    repo4.setPeakHoldEnabled(true)
+    assertTrue(repo4.peakHoldEnabled.value)
+  }
+
+  @Test
+  fun testAll41LanesTempoProfilesBpmMatchingAndComparisonDefaults() {
+    val repo = PromptBankRepository(context)
+    repo.ensureLoaded()
+
+    // Confirm comparison default lanes both resolve cleanly in catalog + frameworks
+    assertTrue("Memphis phonk / dark trap must be in allLanes", repo.allLanes.contains("Memphis phonk / dark trap"))
+    assertTrue("Boom trap must be in allLanes", repo.allLanes.contains("Boom trap"))
+    assertTrue(repo.laneDrums("Memphis phonk / dark trap").isNotBlank())
+    assertTrue(repo.laneDrums("Boom trap").isNotBlank())
+
+    // Every one of 41 lanes must produce valid min <= max tempo bounds
+    for (lane in repo.allLanes) {
+      val profile = repo.laneTempoProfile(lane)
+      assertTrue("Lane '$lane' bpmMin=${profile.bpmMin} must be in 50..210", profile.bpmMin in 50..210)
+      assertTrue("Lane '$lane' bpmMax=${profile.bpmMax} must be >= bpmMin", profile.bpmMax >= profile.bpmMin)
+      assertTrue("Lane '$lane' regionTag must not be blank", profile.regionTag.isNotBlank())
+    }
+
+    // BPM matching at 88 BPM must surface slow/classic hip-hop lanes near the top
+    val slowMatches = repo.rankLanesForBpm(88.0, limit = 5)
+    assertEquals(5, slowMatches.size)
+    assertTrue(
+      "88 BPM should recommend Boom bap / West Coast / Soul / Lo-fi lanes",
+      slowMatches.any { it.profile.bpmMin <= 95 }
+    )
+
+    // BPM brackets must partition properly
+    assertTrue(repo.matchesBpmBracket("Trap", "Any BPM"))
+    assertTrue(repo.matchesBpmBracket("Boom bap", "< 100"))
+    assertTrue(repo.matchesBpmBracket("Detroit trap", "128+"))
+  }
+
+  @Test
+  fun testMainViewModelBpmPresetAndTogglePersistence() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val vm = com.example.viewmodel.MainViewModel(app)
+
+    // Apply a 1-tap BPM-matched lane preset
+    vm.applyBpmMatchedLanePreset("UK drill", 142.0)
+    assertEquals("UK drill", vm.activeLane.value)
+    assertTrue(
+      "Style prompt should contain UK drill and 142 BPM",
+      vm.stylePrompt.value.contains("UK drill", ignoreCase = true) &&
+        vm.stylePrompt.value.contains("142 BPM")
+    )
+    assertTrue("Style prompt must stay within Suno limits", vm.stylePrompt.value.length <= 1000)
+    assertTrue("Lyrics map must retain LOCK_LINE in PRESERVE mode", vm.lyricsMap.value.contains(LOCK_LINE))
+
+    // Toggle peak-hold and adjust sensitivity
+    vm.setPeakHoldEnabled(false)
+    assertFalse(vm.peakHoldEnabled.value)
+    vm.setVisualizerSensitivity(2.2f)
+    assertEquals(2.2f, vm.visualizerSensitivity.value, 0.01f)
+    vm.resetVisualizerSensitivity()
+    assertEquals(1.0f, vm.visualizerSensitivity.value, 0.01f)
+    vm.setPeakHoldEnabled(true)
+
+    // Seeking with no loaded audio is a safe no-op
+    vm.seekAudioToFraction(0.5f)
+    assertEquals(0f, vm.playbackProgress.value, 0.001f)
   }
 }
 

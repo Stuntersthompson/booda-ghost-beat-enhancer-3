@@ -56,12 +56,15 @@ fun SettingsCardView(
           )
         }
 
-        IconButton(onClick = onResetToDefaults, modifier = Modifier.size(32.dp)) {
+        IconButton(
+          onClick = onResetToDefaults,
+          modifier = Modifier.minimumInteractiveComponentSize()
+        ) {
           Icon(
             imageVector = Icons.Default.Refresh,
-            contentDescription = "Reset Settings",
+            contentDescription = "Reset Suno v6 Settings to defaults",
             tint = TextSecondary,
-            modifier = Modifier.size(16.dp)
+            modifier = Modifier.size(18.dp)
           )
         }
       }
