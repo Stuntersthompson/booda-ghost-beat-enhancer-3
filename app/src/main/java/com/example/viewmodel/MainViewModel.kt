@@ -59,6 +59,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   val playbackDurationMs: StateFlow<Long> = audioPlayer.durationMs
   val hasPlayableAudio: StateFlow<Boolean> = audioPlayer.hasAudio
   val isLoopingAudio: StateFlow<Boolean> = audioPlayer.isLooping
+  val isScrubbingAudio: StateFlow<Boolean> = audioPlayer.isScrubbing
 
   // Studio Visualizer Preferences
   val visualizerSensitivity: StateFlow<Float> = preferencesRepo.visualizerSensitivity
@@ -421,6 +422,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   fun seekAudioToFraction(fraction: Float) {
     if (_isRecording.value) return
     audioPlayer.seekToFraction(fraction)
+  }
+
+  fun beginAudioScrub(initialFraction: Float) {
+    if (_isRecording.value) return
+    audioPlayer.beginScrub(initialFraction)
+  }
+
+  fun previewAudioScrub(fraction: Float) {
+    if (_isRecording.value) return
+    audioPlayer.previewScrub(fraction)
+  }
+
+  fun endAudioScrub(fraction: Float) {
+    if (_isRecording.value) return
+    audioPlayer.endScrub(fraction)
   }
 
   fun toggleAudioLoop() {

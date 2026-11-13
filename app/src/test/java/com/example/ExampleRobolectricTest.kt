@@ -1,6 +1,16 @@
 package com.example
 
+import android.app.Application
 import android.content.Context
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AppDatabase
@@ -11,11 +21,15 @@ import com.example.data.model.TakeEntity
 import com.example.data.repository.CuratedPrompts
 import com.example.data.repository.PromptBankRepository
 import com.example.data.repository.StudioPreferencesRepository
+import com.example.ui.screens.LanesScreen
+import com.example.ui.theme.BooDaBeatTheme
+import com.example.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -24,6 +38,9 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ExampleRobolectricTest {
+
+  @get:Rule
+  val composeTestRule = createComposeRule()
 
   private lateinit var context: Context
   private lateinit var database: AppDatabase
@@ -466,6 +483,147 @@ class ExampleRobolectricTest {
     // Seeking with no loaded audio is a safe no-op
     vm.seekAudioToFraction(0.5f)
     assertEquals(0f, vm.playbackProgress.value, 0.001f)
+  }
+
+  @Test
+  fun test41LanesGenreFamiliesAndMetadataSearch() {
+    val repo = PromptBankRepository(context)
+    repo.ensureLoaded()
+
+    val concreteFamilies = PromptBankRepository.GENRE_FAMILIES.filter {
+      it != PromptBankRepository.ALL_FAMILIES_LABEL
+    }
+    assertEquals(7, concreteFamilies.size)
+
+    // Every one of the 41 lanes resolves to one of the 7 families and sums cleanly to 41
+    val familyTotal = concreteFamilies.sumOf { family ->
+      repo.filterLanes(query = "", familyFilter = family).size
+    }
+    assertEquals(41, familyTotal)
+
+    for (lane in repo.allLanes) {
+      val resolved = PromptBankRepository.resolveGenreFamily(lane)
+      assertTrue(
+        "Lane '$lane' resolved to unexpected family '$resolved'",
+        concreteFamilies.contains(resolved)
+      )
+    }
+
+    // Metadata search hits terms inside drum/framework profiles not present in the lane title
+    val mpcSwingResults = repo.filterLanes(query = "MPC swing")
+    assertTrue("Expected Boom bap from 'MPC swing' framework metadata", mpcSwingResults.contains("Boom bap"))
+
+    val cowbellResults = repo.filterLanes(query = "cowbell")
+    assertTrue(cowbellResults.contains("Memphis phonk / dark trap"))
+    assertTrue(cowbellResults.contains("Drift phonk"))
+
+    val fiveBeatResults = repo.filterLanes(query = "5-beat")
+    assertTrue(fiveBeatResults.contains("Jersey club rap"))
+
+    val logDrumResults = repo.filterLanes(query = "log-drum")
+    assertTrue(logDrumResults.contains("Amapiano hip-hop"))
+    assertTrue(logDrumResults.contains("Afro-drill"))
+
+    // Combined Bank + BPM + Family intersection
+    val verifiedDrillHighBpm = repo.filterLanes(
+      query = "",
+      bankFilter = "Verified",
+      bpmBracket = "128+",
+      familyFilter = "Drill & UK"
+    )
+    assertTrue(verifiedDrillHighBpm.containsAll(listOf("Chiraq drill", "UK drill", "NY drill")))
+    assertFalse("NY sample drill is Expansion, not Verified", verifiedDrillHighBpm.contains("NY sample drill"))
+
+    // Contradictory filter yields zero lanes
+    val impossible = repo.filterLanes(
+      query = "",
+      bankFilter = "Verified",
+      bpmBracket = "128+",
+      familyFilter = "Boom Bap & Jazz"
+    )
+    assertTrue(impossible.isEmpty())
+  }
+
+  @Test
+  fun testMainViewModelScrubEdgeCasesWithNoLoadedAudio() {
+    val app = ApplicationProvider.getApplicationContext<Application>()
+    val vm = MainViewModel(app)
+
+    assertFalse(vm.hasPlayableAudio.value)
+    assertFalse(vm.isScrubbingAudio.value)
+    assertEquals(0f, vm.playbackProgress.value, 0.0001f)
+
+    // Attempting drag scrub lifecycle with no audio loaded must remain a safe no-op
+    vm.beginAudioScrub(0.35f)
+    assertFalse("Should not enter scrubbing when durationMs == 0", vm.isScrubbingAudio.value)
+    vm.previewAudioScrub(0.85f)
+    vm.endAudioScrub(1.5f)
+    assertFalse(vm.isScrubbingAudio.value)
+    assertEquals(0f, vm.playbackProgress.value, 0.0001f)
+  }
+
+  @Test
+  fun testLanesScreenSearchDebounceFiltersAndClearRecovery() {
+    val app = ApplicationProvider.getApplicationContext<Application>()
+    val vm = MainViewModel(app)
+
+    composeTestRule.setContent {
+      BooDaBeatTheme {
+        LanesScreen(viewModel = vm)
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Initial state shows all 41 lanes
+    composeTestRule.onNodeWithTag("lanes_result_count")
+      .assertTextEquals("Showing 41 of 41 lanes")
+
+    // Search by metadata ("cowbell") + verify ~150ms debounce applies
+    composeTestRule.onNodeWithTag("input_lanes_search")
+      .performTextInput("cowbell")
+    Thread.sleep(220L)
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("lanes_result_count")
+      .assertTextEquals("Showing 2 of 41 lanes")
+    composeTestRule.onNodeWithTag("action_clear_lane_filters")
+      .assertIsDisplayed()
+
+    // Combine with Verified bank -> only "Memphis phonk / dark trap" remains
+    composeTestRule.onNodeWithTag("filter_bank_Verified").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("lanes_result_count")
+      .assertTextEquals("Showing 1 of 41 lanes")
+    composeTestRule.onNodeWithTag("lanes_catalog_list")
+      .performScrollToNode(hasTestTag("lane_item_memphis_phonk_/_dark_trap"))
+    composeTestRule.onNodeWithTag("lane_item_memphis_phonk_/_dark_trap")
+      .assertIsDisplayed()
+
+    // Scroll header back to top, then switch family to Drill & UK -> 0 matches -> empty state card shown
+    composeTestRule.onNodeWithTag("lanes_catalog_list")
+      .performScrollToIndex(0)
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("filter_family_drill_&_uk")
+      .performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("lanes_result_count")
+      .assertTextEquals("Showing 0 of 41 lanes")
+    composeTestRule.onNodeWithTag("lanes_catalog_list")
+      .performScrollToNode(hasTestTag("lanes_empty_state"))
+    composeTestRule.onNodeWithTag("lanes_empty_state")
+      .assertIsDisplayed()
+
+    // Tap empty-state Clear all filters button -> restores all 41 lanes
+    composeTestRule.onNodeWithTag("lanes_catalog_list")
+      .performScrollToNode(hasTestTag("action_empty_clear_lane_filters"))
+    composeTestRule.onNodeWithTag("action_empty_clear_lane_filters")
+      .performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("lanes_catalog_list")
+      .performScrollToIndex(0)
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("lanes_result_count")
+      .assertTextEquals("Showing 41 of 41 lanes")
   }
 }
 

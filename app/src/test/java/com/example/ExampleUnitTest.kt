@@ -401,4 +401,66 @@ class ExampleUnitTest {
     assertNotNull(com.example.ui.components.resolveLaneAccentColor("Boom bap"))
     assertNotNull(com.example.ui.components.resolveLaneAccentColor("Detroit trap"))
   }
+
+  @Test
+  fun test_playback_math_clamping_looping_and_mmssms_formatting() {
+    // Fraction clamping
+    assertEquals(0f, com.example.audio.PlaybackMath.clampFraction(Float.NaN), 0.0001f)
+    assertEquals(0f, com.example.audio.PlaybackMath.clampFraction(Float.POSITIVE_INFINITY), 0.0001f)
+    assertEquals(0f, com.example.audio.PlaybackMath.clampFraction(Float.NEGATIVE_INFINITY), 0.0001f)
+    assertEquals(0f, com.example.audio.PlaybackMath.clampFraction(-0.5f), 0.0001f)
+    assertEquals(1f, com.example.audio.PlaybackMath.clampFraction(1.8f), 0.0001f)
+    assertEquals(0.42f, com.example.audio.PlaybackMath.clampFraction(0.42f), 0.0001f)
+
+    // Loop wraparound vs non-looping clamp + empty duration guard
+    assertEquals(0L, com.example.audio.PlaybackMath.advanceLoopPositionMs(500L, 0L, isLooping = true))
+    assertEquals(0L, com.example.audio.PlaybackMath.advanceLoopPositionMs(-100L, 10000L, isLooping = true))
+    assertEquals(2500L, com.example.audio.PlaybackMath.advanceLoopPositionMs(12500L, 10000L, isLooping = true))
+    assertEquals(0L, com.example.audio.PlaybackMath.advanceLoopPositionMs(10000L, 10000L, isLooping = true))
+    assertEquals(10000L, com.example.audio.PlaybackMath.advanceLoopPositionMs(12500L, 10000L, isLooping = false))
+
+    // High-precision mm:ss.ms formatting
+    assertEquals("00:00.000", com.example.audio.PlaybackMath.formatDurationMmSsMs(-25L))
+    assertEquals("00:00.000", com.example.audio.PlaybackMath.formatDurationMmSsMs(0L))
+    assertEquals("00:14.320", com.example.audio.PlaybackMath.formatDurationMmSsMs(14320L))
+    assertEquals("01:05.432", com.example.audio.PlaybackMath.formatDurationMmSsMs(65432L))
+  }
+
+  @Test
+  fun test_scrub_state_controller_preserves_play_pause_and_guards_empty_audio() {
+    val controller = com.example.audio.ScrubStateController()
+
+    // Empty audio (durationMs <= 0) must safely refuse scrubbing
+    assertFalse(controller.startScrub(currentlyPlaying = true, initialFraction = 0.5f, durationMs = 0L))
+    assertFalse(controller.isScrubbing)
+    assertEquals(0f, controller.updateScrub(0.6f, durationMs = 0L), 0.0001f)
+    val emptyFinish = controller.finishScrub(0.8f, durationMs = 0L)
+    assertEquals(0f, emptyFinish.first, 0.0001f)
+    assertFalse(emptyFinish.second)
+
+    // Drag while playing preserves playing intent on release and clamps out-of-range scrub values
+    assertTrue(controller.startScrub(currentlyPlaying = true, initialFraction = 0.25f, durationMs = 15000L))
+    assertTrue(controller.isScrubbing)
+    assertTrue(controller.wasPlayingBeforeScrub)
+    assertEquals(0.25f, controller.previewFraction, 0.0001f)
+
+    assertEquals(1f, controller.updateScrub(1.8f, durationMs = 15000L), 0.0001f)
+    assertEquals(0f, controller.updateScrub(-0.3f, durationMs = 15000L), 0.0001f)
+    assertEquals(0f, controller.updateScrub(Float.NaN, durationMs = 15000L), 0.0001f)
+    assertEquals(0.62f, controller.updateScrub(0.62f, durationMs = 15000L), 0.0001f)
+
+    val (releaseFraction, shouldResume) = controller.finishScrub(1.4f, durationMs = 15000L)
+    assertEquals(1f, releaseFraction, 0.0001f)
+    assertTrue("Should resume playback when drag started while playing", shouldResume)
+    assertFalse(controller.isScrubbing)
+    assertFalse(controller.wasPlayingBeforeScrub)
+
+    // Drag while paused preserves paused state on release
+    assertTrue(controller.startScrub(currentlyPlaying = false, initialFraction = 0.1f, durationMs = 15000L))
+    assertEquals(0.45f, controller.updateScrub(0.45f, durationMs = 15000L), 0.0001f)
+    val (pausedReleaseFraction, shouldResumePaused) = controller.cancelScrub(0.33f, durationMs = 15000L)
+    assertEquals(0.33f, pausedReleaseFraction, 0.0001f)
+    assertFalse("Should remain paused when drag started while paused", shouldResumePaused)
+    assertFalse(controller.isScrubbing)
+  }
 }

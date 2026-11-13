@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,7 +13,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterAltOff
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
@@ -23,13 +26,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.repository.PromptBankRepository
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.StudioTab
+import kotlinx.coroutines.delay
 
 @Composable
 fun LanesScreen(viewModel: MainViewModel) {
@@ -37,10 +44,34 @@ fun LanesScreen(viewModel: MainViewModel) {
   val audioAnalysis by viewModel.audioAnalysis.collectAsStateWithLifecycle()
 
   val allLanes = viewModel.bankRepo.allLanes
-  var searchQuery by rememberSaveable { mutableStateOf("") }
+  var rawSearchInput by rememberSaveable { mutableStateOf("") }
+  var debouncedSearchQuery by rememberSaveable { mutableStateOf("") }
   var bankFilter by rememberSaveable { mutableStateOf("All") }
   var bpmFilter by rememberSaveable { mutableStateOf("Any BPM") }
+  var familyFilter by rememberSaveable { mutableStateOf(PromptBankRepository.ALL_FAMILIES_LABEL) }
   var expandedLane by rememberSaveable { mutableStateOf<String?>(activeLane) }
+
+  LaunchedEffect(rawSearchInput) {
+    if (rawSearchInput.isEmpty()) {
+      debouncedSearchQuery = ""
+    } else {
+      delay(150L)
+      debouncedSearchQuery = rawSearchInput
+    }
+  }
+
+  val hasActiveFilters = rawSearchInput.isNotBlank() ||
+    bankFilter != "All" ||
+    bpmFilter != "Any BPM" ||
+    familyFilter != PromptBankRepository.ALL_FAMILIES_LABEL
+
+  val clearAllFilters = {
+    rawSearchInput = ""
+    debouncedSearchQuery = ""
+    bankFilter = "All"
+    bpmFilter = "Any BPM"
+    familyFilter = PromptBankRepository.ALL_FAMILIES_LABEL
+  }
 
   var showComparisonDeck by rememberSaveable { mutableStateOf(false) }
   var laneA by rememberSaveable { mutableStateOf(activeLane) }
@@ -53,25 +84,13 @@ fun LanesScreen(viewModel: MainViewModel) {
   }
   var laneB by rememberSaveable { mutableStateOf(defaultLaneB) }
 
-  val filteredLanes = remember(searchQuery, bankFilter, bpmFilter, allLanes) {
-    allLanes.filter { lane ->
-      val profile = viewModel.bankRepo.laneTempoProfile(lane)
-      val exp = viewModel.bankRepo.expansionLanes.find { it.name.equals(lane, ignoreCase = true) }
-      val matchesSearch = if (searchQuery.isBlank()) {
-        true
-      } else {
-        lane.contains(searchQuery, ignoreCase = true) ||
-          profile.regionTag.contains(searchQuery, ignoreCase = true) ||
-          (exp?.drumTexture?.contains(searchQuery, ignoreCase = true) == true)
-      }
-      val matchesBank = when (bankFilter) {
-        "Verified" -> profile.isVerified
-        "Expansion" -> !profile.isVerified
-        else -> true
-      }
-      val matchesBpm = viewModel.bankRepo.matchesBpmBracket(lane, bpmFilter)
-      matchesSearch && matchesBank && matchesBpm
-    }
+  val filteredLanes = remember(debouncedSearchQuery, bankFilter, bpmFilter, familyFilter, allLanes) {
+    viewModel.bankRepo.filterLanes(
+      query = debouncedSearchQuery,
+      bankFilter = bankFilter,
+      bpmBracket = bpmFilter,
+      familyFilter = familyFilter
+    )
   }
 
   val bpmMatches = remember(audioAnalysis?.bpm, allLanes) {
@@ -91,23 +110,34 @@ fun LanesScreen(viewModel: MainViewModel) {
         color = AmberGold
       )
       Text(
-        text = "21 Verified-Bank Lanes + 20 Expansion Lanes. Filter by region or BPM bracket, compare side-by-side, or match your analyzed beat.",
+        text = "21 Verified-Bank Lanes + 20 Expansion Lanes. Filter by bank, BPM, or genre family, compare side-by-side, or match your beat.",
         style = MaterialTheme.typography.bodyMedium,
         color = TextSecondary
       )
       Spacer(modifier = Modifier.height(10.dp))
 
-      // Search Field
+      // Persistent Debounced Search Field
       OutlinedTextField(
-        value = searchQuery,
-        onValueChange = { searchQuery = it },
-        placeholder = { Text("Search lanes, regions, 808 styles...", color = TextMuted) },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search lanes", tint = TextSecondary) },
+        value = rawSearchInput,
+        onValueChange = { rawSearchInput = it },
+        placeholder = { Text("Search lanes, families, 808 textures, frameworks...", color = TextMuted) },
+        leadingIcon = {
+          Icon(
+            imageVector = Icons.Default.Search,
+            contentDescription = "Search lanes and preset metadata",
+            tint = if (rawSearchInput.isNotEmpty()) StudioCyan else TextSecondary
+          )
+        },
         trailingIcon = {
-          if (searchQuery.isNotEmpty()) {
+          if (rawSearchInput.isNotEmpty()) {
             IconButton(
-              onClick = { searchQuery = "" },
-              modifier = Modifier.minimumInteractiveComponentSize()
+              onClick = {
+                rawSearchInput = ""
+                debouncedSearchQuery = ""
+              },
+              modifier = Modifier
+                .minimumInteractiveComponentSize()
+                .testTag("action_clear_lane_search")
             ) {
               Icon(Icons.Default.Close, contentDescription = "Clear lane search", tint = TextSecondary)
             }
@@ -121,14 +151,19 @@ fun LanesScreen(viewModel: MainViewModel) {
           focusedBorderColor = StudioCyan,
           unfocusedBorderColor = StudioBorder
         ),
-        modifier = Modifier.fillMaxWidth().testTag("input_lanes_search")
+        modifier = Modifier
+          .fillMaxWidth()
+          .semantics {
+            contentDescription = "Search across 41 subgenre lanes, genre families, drum textures, and Suno framework metadata"
+          }
+          .testTag("input_lanes_search")
       )
 
       Spacer(modifier = Modifier.height(8.dp))
 
-      // Bank Tier Filter Row
+      // 1. Bank Tier Filter Row
       LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        val bankChips = listOf("All" to "All (41)", "Verified" to "Verified (21)", "Expansion" to "Expansion (20)")
+        val bankChips = listOf("All" to "All 41", "Verified" to "Verified 21", "Expansion" to "Expansion 20")
         items(bankChips, key = { it.first }) { (key, label) ->
           val selected = bankFilter == key
           FilterChip(
@@ -146,22 +181,31 @@ fun LanesScreen(viewModel: MainViewModel) {
               containerColor = StudioCardElevated,
               labelColor = TextPrimary
             ),
-            modifier = Modifier.testTag("filter_bank_$key")
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .semantics { contentDescription = "Filter by $label bank, ${if (selected) "selected" else "not selected"}" }
+              .testTag("filter_bank_$key")
           )
         }
       }
 
-      // BPM Bracket Filter Row
+      // 2. BPM Bracket Filter Row
       LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         val bpmBrackets = listOf("Any BPM", "< 100", "100-128", "128+")
         items(bpmBrackets, key = { it }) { bracket ->
           val selected = bpmFilter == bracket
+          val displayLabel = when (bracket) {
+            "Any BPM" -> "Any BPM"
+            "< 100" -> "< 100 BPM"
+            "100-128" -> "100-128 BPM"
+            else -> "128+ BPM"
+          }
           FilterChip(
             selected = selected,
             onClick = { bpmFilter = bracket },
             label = {
               Text(
-                text = if (bracket == "Any BPM") bracket else "$bracket BPM",
+                text = displayLabel,
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
               )
             },
@@ -171,16 +215,136 @@ fun LanesScreen(viewModel: MainViewModel) {
               containerColor = StudioCardElevated,
               labelColor = TextPrimary
             ),
-            modifier = Modifier.testTag("filter_bpm_$bracket")
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .semantics { contentDescription = "Filter by $displayLabel tempo bracket, ${if (selected) "selected" else "not selected"}" }
+              .testTag("filter_bpm_$bracket")
           )
         }
       }
 
-      Text(
-        text = "Showing ${filteredLanes.size} of ${allLanes.size} lanes",
-        style = MaterialTheme.typography.labelSmall,
-        color = StudioCyan
-      )
+      // 3. Genre Family Filter Row (All Families + 7 concise families)
+      LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        items(PromptBankRepository.GENRE_FAMILIES, key = { it }) { family ->
+          val selected = familyFilter == family
+          FilterChip(
+            selected = selected,
+            onClick = { familyFilter = family },
+            label = {
+              Text(
+                text = family,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+              )
+            },
+            colors = FilterChipDefaults.filterChipColors(
+              selectedContainerColor = AmberGoldLight,
+              selectedLabelColor = Color.Black,
+              containerColor = StudioCardElevated,
+              labelColor = TextPrimary
+            ),
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .semantics { contentDescription = "Filter by genre family $family, ${if (selected) "selected" else "not selected"}" }
+              .testTag("filter_family_${family.lowercase().replace(" ", "_")}")
+          )
+        }
+      }
+
+      // Live Result Counter + One-Tap Clear All Filters Action
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(top = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "Showing ${filteredLanes.size} of ${allLanes.size} lanes",
+          style = MonospaceMetric.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+          color = StudioCyan,
+          modifier = Modifier.testTag("lanes_result_count")
+        )
+
+        AnimatedVisibility(visible = hasActiveFilters) {
+          TextButton(
+            onClick = clearAllFilters,
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier
+              .minimumInteractiveComponentSize()
+              .semantics { contentDescription = "Clear all lane search and filter criteria" }
+              .testTag("action_clear_lane_filters")
+          ) {
+            Icon(
+              imageVector = Icons.Default.FilterAltOff,
+              contentDescription = null,
+              tint = AmberGold,
+              modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = "Clear all filters",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+              color = AmberGold
+            )
+          }
+        }
+      }
+    }
+  }
+
+  val lanesEmptyStateCard: @Composable () -> Unit = {
+    Surface(
+      color = StudioCard,
+      shape = RoundedCornerShape(12.dp),
+      modifier = Modifier
+        .fillMaxWidth()
+        .border(1.dp, StudioBorder, RoundedCornerShape(12.dp))
+        .testTag("lanes_empty_state")
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+      ) {
+        Icon(
+          imageVector = Icons.Default.SearchOff,
+          contentDescription = null,
+          tint = TextMuted,
+          modifier = Modifier.size(40.dp)
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+          text = if (debouncedSearchQuery.isNotBlank()) {
+            "NO LANES MATCH \"${debouncedSearchQuery.trim().take(24)}\""
+          } else {
+            "NO LANES MATCH ACTIVE FILTERS"
+          },
+          style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+          color = AmberGold
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+          text = "Try broadening the Bank, BPM bracket, or Genre Family filter to inspect all 41 studio lanes.",
+          style = MaterialTheme.typography.bodySmall,
+          color = TextMuted
+        )
+        Spacer(modifier = Modifier.height(14.dp))
+        Button(
+          onClick = clearAllFilters,
+          colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .defaultMinSize(minHeight = 48.dp)
+            .testTag("action_empty_clear_lane_filters")
+        ) {
+          Icon(Icons.Default.FilterAltOff, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(6.dp))
+          Text("Clear all filters", color = Color.Black, fontWeight = FontWeight.Bold)
+        }
+      }
     }
   }
 
@@ -394,25 +558,32 @@ fun LanesScreen(viewModel: MainViewModel) {
       ) {
         // Left Master Pane: Search + Filters + BPM Match + Lane List
         LazyColumn(
-          modifier = Modifier.weight(1f).fillMaxHeight(),
+          modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .testTag("lanes_catalog_list"),
           contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
           verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
           item { headerAndFilters() }
           item { matchBeatBpmBanner() }
-          items(filteredLanes, key = { it }) { lane ->
-            LaneCatalogCard(
-              lane = lane,
-              isSelected = lane == activeLane,
-              isExpanded = lane == expandedLane,
-              viewModel = viewModel,
-              onToggleExpand = { expandedLane = lane },
-              onSelectLane = { viewModel.setLane(lane) },
-              onApplyBpmPreset = {
-                viewModel.applyBpmMatchedLanePreset(lane)
-                viewModel.setTab(StudioTab.BUILD)
-              }
-            )
+          if (filteredLanes.isEmpty()) {
+            item { lanesEmptyStateCard() }
+          } else {
+            items(filteredLanes, key = { it }) { lane ->
+              LaneCatalogCard(
+                lane = lane,
+                isSelected = lane == activeLane,
+                isExpanded = lane == expandedLane,
+                viewModel = viewModel,
+                onToggleExpand = { expandedLane = lane },
+                onSelectLane = { viewModel.setLane(lane) },
+                onApplyBpmPreset = {
+                  viewModel.applyBpmMatchedLanePreset(lane)
+                  viewModel.setTab(StudioTab.BUILD)
+                }
+              )
+            }
           }
         }
 
@@ -444,26 +615,31 @@ fun LanesScreen(viewModel: MainViewModel) {
       LazyColumn(
         modifier = Modifier
           .fillMaxSize()
-          .padding(horizontal = 14.dp),
+          .padding(horizontal = 14.dp)
+          .testTag("lanes_catalog_list"),
         contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
         item { headerAndFilters() }
         item { matchBeatBpmBanner() }
         item { comparisonDeckCard(false) }
-        items(filteredLanes, key = { it }) { lane ->
-          LaneCatalogCard(
-            lane = lane,
-            isSelected = lane == activeLane,
-            isExpanded = lane == expandedLane,
-            viewModel = viewModel,
-            onToggleExpand = { expandedLane = if (expandedLane == lane) null else lane },
-            onSelectLane = { viewModel.setLane(lane) },
-            onApplyBpmPreset = {
-              viewModel.applyBpmMatchedLanePreset(lane)
-              viewModel.setTab(StudioTab.BUILD)
-            }
-          )
+        if (filteredLanes.isEmpty()) {
+          item { lanesEmptyStateCard() }
+        } else {
+          items(filteredLanes, key = { it }) { lane ->
+            LaneCatalogCard(
+              lane = lane,
+              isSelected = lane == activeLane,
+              isExpanded = lane == expandedLane,
+              viewModel = viewModel,
+              onToggleExpand = { expandedLane = if (expandedLane == lane) null else lane },
+              onSelectLane = { viewModel.setLane(lane) },
+              onApplyBpmPreset = {
+                viewModel.applyBpmMatchedLanePreset(lane)
+                viewModel.setTab(StudioTab.BUILD)
+              }
+            )
+          }
         }
       }
     }
@@ -569,7 +745,7 @@ private fun LaneCatalogCard(
             }
           }
           Text(
-            text = "${profile.regionTag}${if (fw != null) " · ${fw.name}" else ""}",
+            text = "${profile.genreFamily} · ${profile.regionTag}${if (fw != null) " · ${fw.name}" else ""}",
             style = MaterialTheme.typography.labelSmall,
             color = TextMuted
           )

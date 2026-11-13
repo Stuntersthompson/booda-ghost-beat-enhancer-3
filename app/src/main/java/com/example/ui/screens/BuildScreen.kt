@@ -53,6 +53,8 @@ fun BuildScreen(viewModel: MainViewModel) {
   val isPlayingAudio by viewModel.isPlayingAudio.collectAsStateWithLifecycle()
   val playbackPositionMs by viewModel.playbackPositionMs.collectAsStateWithLifecycle()
   val playbackDurationMs by viewModel.playbackDurationMs.collectAsStateWithLifecycle()
+  val isLoopingAudio by viewModel.isLoopingAudio.collectAsStateWithLifecycle()
+  val isScrubbingAudio by viewModel.isScrubbingAudio.collectAsStateWithLifecycle()
   val handoffStepsDone by viewModel.handoffStepsDone.collectAsStateWithLifecycle()
 
   var showSaveModal by rememberSaveable { mutableStateOf(false) }
@@ -167,6 +169,19 @@ fun BuildScreen(viewModel: MainViewModel) {
           } else null,
           onSeek = if (hasPlayableAudio && !isRecording) {
             { fraction -> viewModel.seekAudioToFraction(fraction) }
+          } else null,
+          playbackDurationMs = if (hasPlayableAudio && !isRecording) playbackDurationMs else 0L,
+          isPlayingAudio = isPlayingAudio,
+          isLoopingAudio = isLoopingAudio,
+          isScrubbingAudio = isScrubbingAudio,
+          onScrubStart = if (hasPlayableAudio && !isRecording) {
+            { viewModel.beginAudioScrub(it) }
+          } else null,
+          onScrubPreview = if (hasPlayableAudio && !isRecording) {
+            { viewModel.previewAudioScrub(it) }
+          } else null,
+          onScrubEnd = if (hasPlayableAudio && !isRecording) {
+            { viewModel.endAudioScrub(it) }
           } else null,
           activeLane = activeLane,
           beatResetKey = audioAnalysis?.fileName ?: activeLane,

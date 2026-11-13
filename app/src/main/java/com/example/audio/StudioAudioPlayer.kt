@@ -19,9 +19,14 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /**
- * Pure playback progress and seek calculation helpers (JVM-testable).
+ * Pure playback progress, formatting, and seek calculation helpers (JVM-testable).
  */
 object PlaybackMath {
+  fun clampFraction(fraction: Float): Float {
+    if (fraction.isNaN() || fraction.isInfinite()) return 0f
+    return fraction.coerceIn(0f, 1f)
+  }
+
   fun computeNormalizedProgress(positionMs: Long, durationMs: Long): Float {
     if (durationMs <= 0L) return 0f
     return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
@@ -29,14 +34,20 @@ object PlaybackMath {
 
   fun computeSeekTargetMs(fraction: Float, durationMs: Long): Long {
     if (durationMs <= 0L) return 0L
-    val clamped = if (fraction.isNaN()) 0f else fraction.coerceIn(0f, 1f)
+    val clamped = clampFraction(fraction)
     return (clamped * durationMs.toFloat()).roundToLong().coerceIn(0L, durationMs)
   }
 
   fun computePcmSampleIndex(fraction: Float, totalSamples: Int): Int {
     if (totalSamples <= 1) return 0
-    val clamped = if (fraction.isNaN()) 0f else fraction.coerceIn(0f, 1f)
+    val clamped = clampFraction(fraction)
     return (clamped * (totalSamples - 1)).roundToInt().coerceIn(0, totalSamples - 1)
+  }
+
+  fun advanceLoopPositionMs(nextMs: Long, durationMs: Long, isLooping: Boolean): Long {
+    if (durationMs <= 0L) return 0L
+    if (nextMs < 0L) return 0L
+    return if (isLooping) nextMs % durationMs else nextMs.coerceIn(0L, durationMs)
   }
 
   fun formatDurationMmSs(ms: Long): String {
@@ -46,12 +57,71 @@ object PlaybackMath {
     val seconds = totalSec % 60L
     return "%d:%02d".format(minutes, seconds)
   }
+
+  fun formatDurationMmSsMs(ms: Long): String {
+    val safeMs = ms.coerceAtLeast(0L)
+    val totalSec = safeMs / 1000L
+    val minutes = totalSec / 60L
+    val seconds = totalSec % 60L
+    val millis = safeMs % 1000L
+    return "%02d:%02d.%03d".format(minutes, seconds, millis)
+  }
+}
+
+/**
+ * Pure JVM-testable drag-scrub state machine that preserves prior play/pause state across scrub drags
+ * and handles empty-duration or out-of-range edge cases deterministically.
+ */
+class ScrubStateController {
+  var isScrubbing: Boolean = false
+    private set
+  var wasPlayingBeforeScrub: Boolean = false
+    private set
+  var previewFraction: Float = 0f
+    private set
+
+  fun startScrub(currentlyPlaying: Boolean, initialFraction: Float, durationMs: Long): Boolean {
+    if (durationMs <= 0L) {
+      isScrubbing = false
+      wasPlayingBeforeScrub = false
+      return false
+    }
+    if (!isScrubbing) {
+      wasPlayingBeforeScrub = currentlyPlaying
+    }
+    isScrubbing = true
+    previewFraction = PlaybackMath.clampFraction(initialFraction)
+    return true
+  }
+
+  fun updateScrub(fraction: Float, durationMs: Long): Float {
+    if (durationMs <= 0L) return 0f
+    val clamped = PlaybackMath.clampFraction(fraction)
+    previewFraction = clamped
+    return clamped
+  }
+
+  /**
+   * Completes the scrub gesture and returns Pair(clampedFraction, shouldResumePlayback).
+   */
+  fun finishScrub(fraction: Float, durationMs: Long): Pair<Float, Boolean> {
+    val shouldResume = wasPlayingBeforeScrub && durationMs > 0L
+    val clamped = if (durationMs > 0L) PlaybackMath.clampFraction(fraction) else 0f
+    previewFraction = clamped
+    isScrubbing = false
+    wasPlayingBeforeScrub = false
+    return Pair(clamped, shouldResume)
+  }
+
+  fun cancelScrub(fallbackFraction: Float, durationMs: Long): Pair<Float, Boolean> {
+    return finishScrub(fallbackFraction, durationMs)
+  }
 }
 
 /**
  * Unified in-app studio playback controller supporting both imported audio files (MediaPlayer via Uri)
  * and freshly recorded microphone captures held in memory (AudioTrack streaming PCM FloatArray).
- * Emits reactive position/progress StateFlows synced at ~30-60 FPS for waveform playhead scrubbing.
+ * Emits reactive position/progress StateFlows synced at ~60 FPS and supports drag-pause scrubbing.
  */
 class StudioAudioPlayer(private val scope: CoroutineScope) {
 
@@ -66,14 +136,18 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
   private var playbackJob: Job? = null
   private var progressPollJob: Job? = null
 
-  private var pcmCursorSample: Int = 0
+  @Volatile private var pcmCursorSample: Int = 0
   private val pcmLock = Any()
+  private val scrubController = ScrubStateController()
 
   private val _isPlaying = MutableStateFlow(false)
   val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
   private val _isLooping = MutableStateFlow(false)
   val isLooping: StateFlow<Boolean> = _isLooping.asStateFlow()
+
+  private val _isScrubbing = MutableStateFlow(false)
+  val isScrubbing: StateFlow<Boolean> = _isScrubbing.asStateFlow()
 
   private val _hasAudio = MutableStateFlow(false)
   val hasAudio: StateFlow<Boolean> = _hasAudio.asStateFlow()
@@ -114,6 +188,9 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
             try {
               seekTo(0)
             } catch (_: Exception) {}
+          } else {
+            _positionMs.value = 0L
+            _progress.value = 0f
           }
         }
       }
@@ -158,7 +235,7 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
 
   fun play() {
     val src = activeSource ?: return
-    if (_isPlaying.value) return
+    if (_isPlaying.value || !_hasAudio.value || _durationMs.value <= 0L) return
 
     when (src) {
       is AudioSource.UriSource -> {
@@ -205,6 +282,8 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
   }
 
   fun stop() {
+    scrubController.cancelScrub(0f, _durationMs.value)
+    _isScrubbing.value = false
     pause()
     pcmCursorSample = 0
     _positionMs.value = 0L
@@ -216,10 +295,40 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
     }
   }
 
+  fun beginScrub(initialFraction: Float) {
+    val started = scrubController.startScrub(_isPlaying.value, initialFraction, _durationMs.value)
+    if (!started || !_hasAudio.value) return
+    _isScrubbing.value = true
+    if (_isPlaying.value) {
+      pause()
+    }
+    previewScrub(initialFraction)
+  }
+
+  fun previewScrub(fraction: Float) {
+    val dur = _durationMs.value
+    if (dur <= 0L || !_hasAudio.value) return
+    val clamped = scrubController.updateScrub(fraction, dur)
+    val targetMs = PlaybackMath.computeSeekTargetMs(clamped, dur)
+    _progress.value = clamped
+    _positionMs.value = targetMs
+  }
+
+  fun endScrub(fraction: Float) {
+    val dur = _durationMs.value
+    val (clamped, shouldResume) = scrubController.finishScrub(fraction, dur)
+    _isScrubbing.value = false
+    if (dur <= 0L || !_hasAudio.value) return
+    seekToFraction(clamped)
+    if (shouldResume) {
+      play()
+    }
+  }
+
   fun seekToFraction(fraction: Float) {
     val dur = _durationMs.value
     if (dur <= 0L || !_hasAudio.value) return
-    val clamped = if (fraction.isNaN()) 0f else fraction.coerceIn(0f, 1f)
+    val clamped = PlaybackMath.clampFraction(fraction)
     val targetMs = PlaybackMath.computeSeekTargetMs(clamped, dur)
 
     _positionMs.value = targetMs
@@ -266,19 +375,22 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
     progressPollJob?.cancel()
     progressPollJob = scope.launch(Dispatchers.Main) {
       while (isActive && _isPlaying.value) {
-        val mp = mediaPlayer ?: break
-        try {
-          val pos = mp.currentPosition.toLong().coerceAtLeast(0L)
-          val dur = mp.duration.toLong().let { if (it > 0L) it else _durationMs.value }
-          if (dur > 0L) {
-            _durationMs.value = dur
-            _positionMs.value = pos.coerceAtMost(dur)
-            _progress.value = PlaybackMath.computeNormalizedProgress(pos, dur)
+        if (!_isScrubbing.value) {
+          val mp = mediaPlayer ?: break
+          try {
+            val rawPos = mp.currentPosition.toLong().coerceAtLeast(0L)
+            val dur = mp.duration.toLong().let { if (it > 0L) it else _durationMs.value }
+            if (dur > 0L) {
+              val safePos = PlaybackMath.advanceLoopPositionMs(rawPos, dur, _isLooping.value)
+              _durationMs.value = dur
+              _positionMs.value = safePos
+              _progress.value = PlaybackMath.computeNormalizedProgress(safePos, dur)
+            }
+          } catch (_: Exception) {
+            break
           }
-        } catch (_: Exception) {
-          break
         }
-        delay(24L)
+        delay(16L) // ~60 FPS sync
       }
     }
   }
@@ -320,10 +432,14 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
 
     _isPlaying.value = true
     playbackJob = scope.launch(Dispatchers.IO) {
-      val chunkFloats = 1024
+      val chunkFloats = 735 // ~16.6ms at 44.1kHz for tight 60 FPS progress reporting
       val shortChunk = ShortArray(chunkFloats)
       try {
         while (isActive && _isPlaying.value) {
+          if (_isScrubbing.value) {
+            delay(16L)
+            continue
+          }
           val cursor = pcmCursorSample
           if (cursor >= samples.size) {
             if (_isLooping.value) {
@@ -352,10 +468,13 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
           if (written <= 0) break
 
           pcmCursorSample = cursor + count
-          val posMs = ((pcmCursorSample.toDouble() / sampleRate.toDouble()) * 1000.0).roundToLong()
-          val durMs = _durationMs.value
-          _positionMs.value = posMs.coerceIn(0L, durMs)
-          _progress.value = PlaybackMath.computeNormalizedProgress(posMs, durMs)
+          if (!_isScrubbing.value) {
+            val durMs = _durationMs.value
+            val posMs = ((pcmCursorSample.toDouble() / sampleRate.toDouble()) * 1000.0).roundToLong()
+            val safePos = PlaybackMath.advanceLoopPositionMs(posMs, durMs, _isLooping.value)
+            _positionMs.value = safePos
+            _progress.value = PlaybackMath.computeNormalizedProgress(safePos, durMs)
+          }
         }
       } catch (e: Exception) {
         e.printStackTrace()
@@ -365,6 +484,8 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
 
   private fun releaseActiveEngines() {
     _isPlaying.value = false
+    _isScrubbing.value = false
+    scrubController.cancelScrub(0f, 0L)
     progressPollJob?.cancel()
     playbackJob?.cancel()
     progressPollJob = null

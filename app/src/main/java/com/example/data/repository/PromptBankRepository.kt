@@ -402,9 +402,10 @@ class PromptBankRepository(private val context: Context) {
   }
 
   /**
-   * Resolves BPM bounds, regional category, and catalog tier for any of the 41 studio lanes.
+   * Resolves BPM bounds, regional category, standardized genre family, and catalog tier for any of the 41 studio lanes.
    */
   fun laneTempoProfile(lane: String): LaneTempoProfile {
+    val family = resolveGenreFamily(lane)
     val exp = expansionLanes.find { it.name.equals(lane, ignoreCase = true) }
     if (exp != null) {
       val (minBpm, maxBpm) = parseBpmRange(exp.tempoRange)
@@ -413,16 +414,83 @@ class PromptBankRepository(private val context: Context) {
         bpmMin = minBpm,
         bpmMax = maxBpm,
         regionTag = exp.region,
+        genreFamily = family,
         isVerified = false
       )
     }
-    return VERIFIED_TEMPO_PROFILES[lane] ?: LaneTempoProfile(
-      lane = lane,
-      bpmMin = 120,
-      bpmMax = 148,
-      regionTag = "Studio Core",
-      isVerified = true
-    )
+    val verified = VERIFIED_TEMPO_PROFILES[lane]
+    return if (verified != null) {
+      verified.copy(genreFamily = family)
+    } else {
+      LaneTempoProfile(
+        lane = lane,
+        bpmMin = 120,
+        bpmMax = 148,
+        regionTag = "Studio Core",
+        genreFamily = family,
+        isVerified = true
+      )
+    }
+  }
+
+  /**
+   * Builds normalized lowercase search text aggregating lane name, genre family, region, drums,
+   * bass profile, style hints, and framework structural moves across all 41 lanes.
+   */
+  fun laneSearchText(lane: String): String {
+    val profile = laneTempoProfile(lane)
+    val exp = expansionLanes.find { it.name.equals(lane, ignoreCase = true) }
+    val fw = frameworks[lane]
+    val drums = laneDrums(lane)
+    return buildString {
+      append(lane).append(' ')
+      append(profile.genreFamily).append(' ')
+      append(profile.regionTag).append(' ')
+      append("${profile.bpmMin}-${profile.bpmMax} bpm").append(' ')
+      append(drums).append(' ')
+      if (exp != null) {
+        append(exp.styleHint).append(' ')
+        append(exp.bassProfile).append(' ')
+      }
+      if (fw != null) {
+        append(fw.name).append(' ')
+        append(fw.build).append(' ')
+        append(fw.drop).append(' ')
+        append(fw.breakdown).append(' ')
+        append(fw.signature).append(' ')
+      }
+    }.lowercase()
+  }
+
+  /**
+   * Filters all 41 studio lanes by debounced multi-word query, bank tier, BPM bracket, and genre family.
+   */
+  fun filterLanes(
+    query: String,
+    bankFilter: String = "All",
+    bpmBracket: String = "Any BPM",
+    familyFilter: String = ALL_FAMILIES_LABEL
+  ): List<String> {
+    val trimmed = query.trim()
+    val tokens = if (trimmed.isEmpty()) emptyList() else trimmed.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    return allLanes.filter { lane ->
+      val profile = laneTempoProfile(lane)
+      val matchesSearch = if (tokens.isEmpty()) {
+        true
+      } else {
+        val target = laneSearchText(lane)
+        tokens.all { token -> target.contains(token.lowercase()) }
+      }
+      val matchesBank = when (bankFilter) {
+        "Verified" -> profile.isVerified
+        "Expansion" -> !profile.isVerified
+        else -> true
+      }
+      val matchesBpm = matchesBpmBracket(lane, bpmBracket)
+      val matchesFamily = familyFilter == ALL_FAMILIES_LABEL ||
+        profile.genreFamily.equals(familyFilter, ignoreCase = true)
+      matchesSearch && matchesBank && matchesBpm && matchesFamily
+    }
   }
 
   /**
@@ -470,28 +538,104 @@ class PromptBankRepository(private val context: Context) {
   }
 
   companion object {
+    const val ALL_FAMILIES_LABEL = "All Families"
+
+    val GENRE_FAMILIES: List<String> = listOf(
+      ALL_FAMILIES_LABEL,
+      "Trap Core",
+      "Drill & UK",
+      "Boom Bap & Jazz",
+      "Soul & Gospel",
+      "Phonk & Rage",
+      "Regional Bounce",
+      "Slab & Global"
+    )
+
+    private val LANE_FAMILY_MAP: Map<String, String> = mapOf(
+      // Trap Core (8)
+      "Trap" to "Trap Core",
+      "Down South / Southern trap" to "Trap Core",
+      "Detroit trap" to "Trap Core",
+      "Detroit scam-rap pocket" to "Trap Core",
+      "Florida fast" to "Trap Core",
+      "Hood trap" to "Trap Core",
+      "Dark trap" to "Trap Core",
+      "Plugg" to "Trap Core",
+      // Drill & UK (6)
+      "Chiraq drill" to "Drill & UK",
+      "UK drill" to "Drill & UK",
+      "NY drill" to "Drill & UK",
+      "NY sample drill" to "Drill & UK",
+      "Grime" to "Drill & UK",
+      "Afro-drill" to "Drill & UK",
+      // Boom Bap & Jazz (5)
+      "Boom bap" to "Boom Bap & Jazz",
+      "Boom bap revival / conscious" to "Boom Bap & Jazz",
+      "East Coast" to "Boom Bap & Jazz",
+      "Jazz rap / lo-fi" to "Boom Bap & Jazz",
+      "Boom trap" to "Boom Bap & Jazz",
+      // Soul & Gospel (5)
+      "Gospel trap" to "Soul & Gospel",
+      "Soul-sample hip-hop" to "Soul & Gospel",
+      "Trap soul" to "Soul & Gospel",
+      "Cloud rap / dreamo" to "Soul & Gospel",
+      "Pluggnb" to "Soul & Gospel",
+      // Phonk & Rage (6)
+      "Memphis phonk / dark trap" to "Phonk & Rage",
+      "Drift phonk" to "Phonk & Rage",
+      "Rage" to "Phonk & Rage",
+      "Horrorcore" to "Phonk & Rage",
+      "Digicore / glitch trap" to "Phonk & Rage",
+      "Tread" to "Phonk & Rage",
+      // Regional Bounce (6)
+      "West Coast / G-funk" to "Regional Bounce",
+      "Jerk" to "Regional Bounce",
+      "Milwaukee low-end" to "Regional Bounce",
+      "DMV crank" to "Regional Bounce",
+      "Jersey club rap" to "Regional Bounce",
+      "New Orleans bounce" to "Regional Bounce",
+      // Slab & Global (5)
+      "Texas slab" to "Slab & Global",
+      "Chopped & screwed" to "Slab & Global",
+      "Afro-trap" to "Slab & Global",
+      "Latin trap" to "Slab & Global",
+      "Amapiano hip-hop" to "Slab & Global"
+    )
+
+    fun resolveGenreFamily(lane: String): String {
+      return LANE_FAMILY_MAP[lane]
+        ?: LANE_FAMILY_MAP.entries.firstOrNull { it.key.equals(lane, ignoreCase = true) }?.value
+        ?: when {
+          lane.contains("drill", ignoreCase = true) || lane.contains("grime", ignoreCase = true) -> "Drill & UK"
+          lane.contains("boom", ignoreCase = true) || lane.contains("jazz", ignoreCase = true) -> "Boom Bap & Jazz"
+          lane.contains("gospel", ignoreCase = true) || lane.contains("soul", ignoreCase = true) -> "Soul & Gospel"
+          lane.contains("phonk", ignoreCase = true) || lane.contains("rage", ignoreCase = true) -> "Phonk & Rage"
+          else -> "Trap Core"
+        }
+    }
+
     private val VERIFIED_TEMPO_PROFILES: Map<String, LaneTempoProfile> = mapOf(
-      "Trap" to LaneTempoProfile("Trap", 128, 152, "Atlanta / Core", true),
-      "Chiraq drill" to LaneTempoProfile("Chiraq drill", 132, 150, "Chicago", true),
-      "UK drill" to LaneTempoProfile("UK drill", 136, 146, "London / UK", true),
-      "NY drill" to LaneTempoProfile("NY drill", 138, 152, "New York", true),
-      "Boom bap" to LaneTempoProfile("Boom bap", 82, 98, "90s Classic", true),
-      "Boom bap revival / conscious" to LaneTempoProfile("Boom bap revival / conscious", 80, 96, "Conscious", true),
-      "Detroit trap" to LaneTempoProfile("Detroit trap", 142, 168, "Detroit", true),
-      "West Coast / G-funk" to LaneTempoProfile("West Coast / G-funk", 88, 105, "West Coast", true),
-      "Memphis phonk / dark trap" to LaneTempoProfile("Memphis phonk / dark trap", 118, 145, "Memphis", true),
-      "Gospel trap" to LaneTempoProfile("Gospel trap", 124, 148, "Sanctuary", true),
-      "Cloud rap / dreamo" to LaneTempoProfile("Cloud rap / dreamo", 110, 136, "Atmospheric", true),
-      "Trap soul" to LaneTempoProfile("Trap soul", 95, 126, "Late Night R&B", true),
-      "Jersey club rap" to LaneTempoProfile("Jersey club rap", 134, 150, "Newark / East", true),
-      "Plugg" to LaneTempoProfile("Plugg", 128, 148, "Atlanta / Plugg", true),
-      "Pluggnb" to LaneTempoProfile("Pluggnb", 122, 144, "Melodic Plugg", true),
-      "Rage" to LaneTempoProfile("Rage", 136, 160, "Hyper / Synth", true),
-      "Horrorcore" to LaneTempoProfile("Horrorcore", 100, 138, "Dark / Experimental", true),
-      "Soul-sample hip-hop" to LaneTempoProfile("Soul-sample hip-hop", 82, 104, "MPC Soul", true),
-      "Down South / Southern trap" to LaneTempoProfile("Down South / Southern trap", 120, 144, "South", true),
-      "East Coast" to LaneTempoProfile("East Coast", 85, 102, "NYC / East", true),
-      "Jazz rap / lo-fi" to LaneTempoProfile("Jazz rap / lo-fi", 74, 94, "Lo-Fi / Jazz", true)
+      "Trap" to LaneTempoProfile("Trap", 128, 152, "Atlanta / Core", "Trap Core", true),
+      "Chiraq drill" to LaneTempoProfile("Chiraq drill", 132, 150, "Chicago", "Drill & UK", true),
+      "UK drill" to LaneTempoProfile("UK drill", 136, 146, "London / UK", "Drill & UK", true),
+      "NY drill" to LaneTempoProfile("NY drill", 138, 152, "New York", "Drill & UK", true),
+      "Boom bap" to LaneTempoProfile("Boom bap", 82, 98, "90s Classic", "Boom Bap & Jazz", true),
+      "Boom bap revival / conscious" to LaneTempoProfile("Boom bap revival / conscious", 80, 96, "Conscious", "Boom Bap & Jazz", true),
+      "Detroit trap" to LaneTempoProfile("Detroit trap", 142, 168, "Detroit", "Trap Core", true),
+      "West Coast / G-funk" to LaneTempoProfile("West Coast / G-funk", 88, 105, "West Coast", "Regional Bounce", true),
+      "Memphis phonk / dark trap" to LaneTempoProfile("Memphis phonk / dark trap", 118, 145, "Memphis", "Phonk & Rage", true),
+      "Gospel trap" to LaneTempoProfile("Gospel trap", 124, 148, "Sanctuary", "Soul & Gospel", true),
+      "Cloud rap / dreamo" to LaneTempoProfile("Cloud rap / dreamo", 110, 136, "Atmospheric", "Soul & Gospel", true),
+      "Trap soul" to LaneTempoProfile("Trap soul", 95, 126, "Late Night R&B", "Soul & Gospel", true),
+      "Jersey club rap" to LaneTempoProfile("Jersey club rap", 134, 150, "Newark / East", "Regional Bounce", true),
+      "Plugg" to LaneTempoProfile("Plugg", 128, 148, "Atlanta / Plugg", "Trap Core", true),
+      "Pluggnb" to LaneTempoProfile("Pluggnb", 122, 144, "Melodic Plugg", "Soul & Gospel", true),
+      "Rage" to LaneTempoProfile("Rage", 136, 160, "Hyper / Synth", "Phonk & Rage", true),
+      "Horrorcore" to LaneTempoProfile("Horrorcore", 100, 138, "Dark / Experimental", "Phonk & Rage", true),
+      "Soul-sample hip-hop" to LaneTempoProfile("Soul-sample hip-hop", 82, 104, "MPC Soul", "Soul & Gospel", true),
+      "Down South / Southern trap" to LaneTempoProfile("Down South / Southern trap", 120, 144, "South", "Trap Core", true),
+      "East Coast" to LaneTempoProfile("East Coast", 85, 102, "NYC / East", "Boom Bap & Jazz", true),
+      "Jazz rap / lo-fi" to LaneTempoProfile("Jazz rap / lo-fi", 74, 94, "Lo-Fi / Jazz", "Boom Bap & Jazz", true)
     )
 
     fun parseBpmRange(rangeStr: String): Pair<Int, Int> {
@@ -510,6 +654,7 @@ data class LaneTempoProfile(
   val bpmMin: Int,
   val bpmMax: Int,
   val regionTag: String,
+  val genreFamily: String = "Trap Core",
   val isVerified: Boolean
 )
 

@@ -3,8 +3,6 @@ package com.example.ui.components
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,7 +25,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -247,6 +244,13 @@ fun RealtimeWaveformVisualizer(
   peakHoldEnabledProvider: () -> Boolean = { true },
   playheadProgressProvider: (() -> Float)? = null,
   onSeek: ((Float) -> Unit)? = null,
+  playbackDurationMs: Long = 0L,
+  isPlayingAudio: Boolean = false,
+  isLoopingAudio: Boolean = false,
+  isScrubbingAudio: Boolean = false,
+  onScrubStart: ((Float) -> Unit)? = null,
+  onScrubPreview: ((Float) -> Unit)? = null,
+  onScrubEnd: ((Float) -> Unit)? = null,
   activeLane: String = "",
   beatResetKey: Any? = null,
   currentPeakDb: Float = -60f,
@@ -400,47 +404,32 @@ fun RealtimeWaveformVisualizer(
 
       Spacer(modifier = Modifier.height(10.dp))
 
-      // High-Performance Draw-Scoped Waveform Container
-      Box(
+      // High-Performance Draw-Scoped Waveform Container wrapped in reusable Synchronized Scrubber Overlay
+      WaveformScrubberOverlay(
+        durationMs = playbackDurationMs,
+        isPlaying = isPlayingAudio,
+        isLooping = isLoopingAudio,
+        isScrubbing = isScrubbingAudio,
+        progressProvider = { playheadProgressProvider?.invoke() ?: 0f },
+        onScrubStart = { frac -> onScrubStart?.invoke(frac) },
+        onScrubPreview = { frac -> onScrubPreview?.invoke(frac) },
+        onScrubEnd = { frac -> onScrubEnd?.invoke(frac) ?: onSeek?.invoke(frac) },
+        onTapSeek = { frac -> onSeek?.invoke(frac) },
+        enabled = !isLiveRecording && onSeek != null && playheadProgressProvider != null && playbackDurationMs > 0L,
+        accentColor = AmberGold,
+        compact = false,
+        inspectionXState = inspectPositionXState,
         modifier = Modifier
           .fillMaxWidth()
           .height(110.dp)
           .clip(RoundedCornerShape(8.dp))
           .background(StudioBg)
           .border(0.5.dp, StudioBorder, RoundedCornerShape(8.dp))
-          .semantics {
-            contentDescription = if (onSeek != null) {
-              "Interactive audio waveform. Tap or drag horizontally to scrub playback position."
-            } else {
-              "Real-time audio waveform visualizer."
-            }
-          }
-          .pointerInput(onSeek) {
-            detectTapGestures(
-              onTap = { offset ->
-                inspectPositionXState.value = offset.x
-                if (onSeek != null && size.width > 0) {
-                  onSeek((offset.x / size.width.toFloat()).coerceIn(0f, 1f))
-                }
-              },
-              onPress = { offset ->
-                inspectPositionXState.value = offset.x
-                if (onSeek != null && size.width > 0) {
-                  onSeek((offset.x / size.width.toFloat()).coerceIn(0f, 1f))
-                }
-              }
-            )
-          }
-          .pointerInput(onSeek) {
-            detectDragGestures { change, _ ->
-              change.consume()
-              inspectPositionXState.value = change.position.x
-              if (onSeek != null && size.width > 0) {
-                onSeek((change.position.x / size.width.toFloat()).coerceIn(0f, 1f))
-              }
-            }
-          }
-          .drawWithCache {
+      ) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .drawWithCache {
             val canvasWidth = size.width
             val canvasHeight = size.height
             val centerY = canvasHeight / 2f
@@ -531,13 +520,9 @@ fun RealtimeWaveformVisualizer(
             val capGlowClip = clipEdgeColor.copy(alpha = 0.42f)
             val oscGlowColor = (if (isLiveRecording) StudioMiss else highEdgeColor).copy(alpha = 0.3f)
             val oscLineColor = if (isLiveRecording) StudioMiss else centerColor
-            val playheadGlowColor = Color.White.copy(alpha = 0.28f)
-            val playheadLineColor = Color.White
-
             val oscPath = Path()
             val oscGlowStroke = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round)
             val oscLineStroke = Stroke(width = 2.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-            val cursorDashEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 4f))
             val barCornerRadius = CornerRadius(2f, 2f)
             val glowCornerRadius = CornerRadius(3f, 3f)
             val capCornerRadius = CornerRadius(1f, 1f)
@@ -767,50 +752,11 @@ fun RealtimeWaveformVisualizer(
                   drawPath(path = oscPath, color = oscLineColor, style = oscLineStroke)
                 }
               }
-
-              // 4. Synced Playback Playhead OR Inspection Cursor
-              val activeProgress = playheadProgressProvider?.invoke()
-              if (!isLiveRecording && activeProgress != null) {
-                val playX = (activeProgress.coerceIn(0f, 1f) * canvasWidth).coerceIn(0f, canvasWidth)
-                drawLine(
-                  color = playheadGlowColor,
-                  start = Offset(playX, 0f),
-                  end = Offset(playX, canvasHeight),
-                  strokeWidth = 6f
-                )
-                drawLine(
-                  color = playheadLineColor,
-                  start = Offset(playX, 0f),
-                  end = Offset(playX, canvasHeight),
-                  strokeWidth = 2f
-                )
-                drawCircle(
-                  color = highEdgeColor,
-                  radius = 4.5f,
-                  center = Offset(playX, centerY)
-                )
-              } else {
-                val tapX = inspectPositionXState.value
-                if (tapX != null) {
-                  val clampedX = tapX.coerceIn(0f, canvasWidth)
-                  drawLine(
-                    color = Color.White,
-                    start = Offset(clampedX, 0f),
-                    end = Offset(clampedX, canvasHeight),
-                    strokeWidth = 1.5f,
-                    pathEffect = cursorDashEffect
-                  )
-                  drawCircle(
-                    color = highEdgeColor,
-                    radius = 4f,
-                    center = Offset(clampedX, centerY)
-                  )
-                }
-              }
             }
           }
           .testTag("waveform_canvas")
-      ) {}
+        ) {}
+      }
 
       Spacer(modifier = Modifier.height(8.dp))
 
@@ -885,6 +831,13 @@ fun CompactWaveformMeter(
   peakHoldEnabledProvider: () -> Boolean = { true },
   playheadProgressProvider: (() -> Float)? = null,
   onSeek: ((Float) -> Unit)? = null,
+  playbackDurationMs: Long = 0L,
+  isPlayingAudio: Boolean = false,
+  isLoopingAudio: Boolean = false,
+  isScrubbingAudio: Boolean = false,
+  onScrubStart: ((Float) -> Unit)? = null,
+  onScrubPreview: ((Float) -> Unit)? = null,
+  onScrubEnd: ((Float) -> Unit)? = null,
   activeLane: String = "",
   beatResetKey: Any? = null,
   modifier: Modifier = Modifier
@@ -908,41 +861,30 @@ fun CompactWaveformMeter(
     }
   }
 
-  Box(
+  WaveformScrubberOverlay(
+    durationMs = playbackDurationMs,
+    isPlaying = isPlayingAudio,
+    isLooping = isLoopingAudio,
+    isScrubbing = isScrubbingAudio,
+    progressProvider = { playheadProgressProvider?.invoke() ?: 0f },
+    onScrubStart = { frac -> onScrubStart?.invoke(frac) },
+    onScrubPreview = { frac -> onScrubPreview?.invoke(frac) },
+    onScrubEnd = { frac -> onScrubEnd?.invoke(frac) ?: onSeek?.invoke(frac) },
+    onTapSeek = { frac -> onSeek?.invoke(frac) },
+    enabled = onSeek != null && playheadProgressProvider != null && playbackDurationMs > 0L,
+    accentColor = AmberGold,
+    compact = true,
     modifier = modifier
       .fillMaxWidth()
       .height(44.dp)
       .clip(RoundedCornerShape(6.dp))
       .background(StudioBg)
       .border(0.5.dp, StudioBorder, RoundedCornerShape(6.dp))
-      .then(
-        if (onSeek != null) {
-          Modifier
-            .semantics {
-              contentDescription = "Compact groove waveform meter. Tap or drag to scrub playback."
-            }
-            .pointerInput(onSeek) {
-              detectTapGestures(
-                onTap = { offset ->
-                  if (size.width > 0) {
-                    onSeek((offset.x / size.width.toFloat()).coerceIn(0f, 1f))
-                  }
-                }
-              )
-            }
-            .pointerInput(onSeek) {
-              detectDragGestures { change, _ ->
-                change.consume()
-                if (size.width > 0) {
-                  onSeek((change.position.x / size.width.toFloat()).coerceIn(0f, 1f))
-                }
-              }
-            }
-        } else {
-          Modifier
-        }
-      )
-      .drawWithCache {
+  ) {
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .drawWithCache {
         val canvasWidth = size.width
         val canvasHeight = size.height
         val centerY = canvasHeight / 2f
@@ -1112,20 +1054,11 @@ fun CompactWaveformMeter(
             }
           }
 
-          val activeProgress = playheadProgressProvider?.invoke()
-          if (activeProgress != null) {
-            val playX = (activeProgress.coerceIn(0f, 1f) * canvasWidth).coerceIn(0f, canvasWidth)
-            drawLine(
-              color = capLineColor,
-              start = Offset(playX, 0f),
-              end = Offset(playX, canvasHeight),
-              strokeWidth = 2f
-            )
-          }
         }
       }
       .testTag("compact_waveform_meter")
-  ) {}
+    ) {}
+  }
 }
 
 /**

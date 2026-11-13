@@ -58,6 +58,7 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
   val playbackDurationMs by viewModel.playbackDurationMs.collectAsStateWithLifecycle()
   val hasPlayableAudio by viewModel.hasPlayableAudio.collectAsStateWithLifecycle()
   val isLoopingAudio by viewModel.isLoopingAudio.collectAsStateWithLifecycle()
+  val isScrubbingAudio by viewModel.isScrubbingAudio.collectAsStateWithLifecycle()
 
   var showWordsDialog by rememberSaveable { mutableStateOf(false) }
   var wordsInput by rememberSaveable(analysis?.fileName, analysis?.sampleWordsText) {
@@ -135,12 +136,16 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
               hasPlayableAudio = hasPlayableAudio,
               isPlayingAudio = isPlayingAudio,
               isLoopingAudio = isLoopingAudio,
+              isScrubbingAudio = isScrubbingAudio,
               playbackPositionMs = playbackPositionMs,
               playbackDurationMs = playbackDurationMs,
               playbackProgressState = playbackProgressState,
               sensitivityState = sensitivityState,
               peakHoldState = peakHoldState,
               onSeek = { viewModel.seekAudioToFraction(it) },
+              onScrubStart = { viewModel.beginAudioScrub(it) },
+              onScrubPreview = { viewModel.previewAudioScrub(it) },
+              onScrubEnd = { viewModel.endAudioScrub(it) },
               onTogglePlayPause = { viewModel.togglePlayPauseAudio() },
               onStop = { viewModel.stopAudioPlayback() },
               onToggleLoop = { viewModel.toggleAudioLoop() }
@@ -236,12 +241,16 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
               hasPlayableAudio = hasPlayableAudio,
               isPlayingAudio = isPlayingAudio,
               isLoopingAudio = isLoopingAudio,
+              isScrubbingAudio = isScrubbingAudio,
               playbackPositionMs = playbackPositionMs,
               playbackDurationMs = playbackDurationMs,
               playbackProgressState = playbackProgressState,
               sensitivityState = sensitivityState,
               peakHoldState = peakHoldState,
               onSeek = { viewModel.seekAudioToFraction(it) },
+              onScrubStart = { viewModel.beginAudioScrub(it) },
+              onScrubPreview = { viewModel.previewAudioScrub(it) },
+              onScrubEnd = { viewModel.endAudioScrub(it) },
               onTogglePlayPause = { viewModel.togglePlayPauseAudio() },
               onStop = { viewModel.stopAudioPlayback() },
               onToggleLoop = { viewModel.toggleAudioLoop() }
@@ -494,12 +503,16 @@ private fun AnalyzedWaveformSection(
   hasPlayableAudio: Boolean,
   isPlayingAudio: Boolean,
   isLoopingAudio: Boolean,
+  isScrubbingAudio: Boolean,
   playbackPositionMs: Long,
   playbackDurationMs: Long,
   playbackProgressState: State<Float>,
   sensitivityState: State<Float>,
   peakHoldState: State<Boolean>,
   onSeek: (Float) -> Unit,
+  onScrubStart: (Float) -> Unit,
+  onScrubPreview: (Float) -> Unit,
+  onScrubEnd: (Float) -> Unit,
   onTogglePlayPause: () -> Unit,
   onStop: () -> Unit,
   onToggleLoop: () -> Unit
@@ -514,6 +527,13 @@ private fun AnalyzedWaveformSection(
         { playbackProgressState.value }
       } else null,
       onSeek = if (hasPlayableAudio && !isRecording) onSeek else null,
+      playbackDurationMs = if (hasPlayableAudio && !isRecording) playbackDurationMs else 0L,
+      isPlayingAudio = isPlayingAudio,
+      isLoopingAudio = isLoopingAudio,
+      isScrubbingAudio = isScrubbingAudio,
+      onScrubStart = if (hasPlayableAudio && !isRecording) onScrubStart else null,
+      onScrubPreview = if (hasPlayableAudio && !isRecording) onScrubPreview else null,
+      onScrubEnd = if (hasPlayableAudio && !isRecording) onScrubEnd else null,
       activeLane = activeLane,
       beatResetKey = analysis.fileName,
       bpm = analysis.bpm,
