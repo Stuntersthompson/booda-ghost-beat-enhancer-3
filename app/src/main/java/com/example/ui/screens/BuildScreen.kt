@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -16,10 +20,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ai.TranscriptionTarget
+import com.example.ai.TranscriptionUiState
 import com.example.audio.PlaybackMath
 import com.example.data.model.*
 import com.example.ui.components.CompactWaveformMeter
@@ -58,11 +66,23 @@ fun BuildScreen(viewModel: MainViewModel) {
   val isScrubbingAudio by viewModel.isScrubbingAudio.collectAsStateWithLifecycle()
   val handoffStepsDone by viewModel.handoffStepsDone.collectAsStateWithLifecycle()
   val recentHistory by viewModel.recentPromptHistory.collectAsStateWithLifecycle()
+  val micTranscriptionState by viewModel.micTranscriptionState.collectAsStateWithLifecycle()
 
   var showSaveModal by rememberSaveable { mutableStateOf(false) }
   var takeNameInput by rememberSaveable { mutableStateOf("") }
   var beatTitleInput by rememberSaveable { mutableStateOf("") }
   var showExcludeDropdown by remember { mutableStateOf(false) }
+  var pendingTranscriptionTarget by rememberSaveable { mutableStateOf(TranscriptionTarget.BUILD_LYRICS) }
+
+  val dictatePermissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission()
+  ) { isGranted ->
+    if (isGranted) {
+      viewModel.startMicTranscription(pendingTranscriptionTarget)
+    } else {
+      Toast.makeText(context, "Microphone permission is required for voice dictation", Toast.LENGTH_SHORT).show()
+    }
+  }
 
   val isPreserve = jobType == JobType.PRESERVE
   val hasLockLine = stylePrompt.contains(LOCK_LINE)
@@ -237,6 +257,24 @@ fun BuildScreen(viewModel: MainViewModel) {
         Text("Randomize", style = MaterialTheme.typography.labelMedium, color = TextPrimary)
       }
     }
+  }
+
+  val voiceDictationCard: @Composable () -> Unit = {
+    BuildVoiceTranscriptionCard(
+      state = micTranscriptionState,
+      onToggleDictate = { target ->
+        if (micTranscriptionState is TranscriptionUiState.Recording) {
+          viewModel.stopMicTranscription()
+        } else {
+          pendingTranscriptionTarget = target
+          dictatePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+      },
+      onApplyToLyrics = { text -> viewModel.applyTranscriptToLyrics(text, context) },
+      onApplyToStyle = { text -> viewModel.applyTranscriptToStyle(text, context) },
+      onRetry = { viewModel.retryLastTranscription() },
+      onDismiss = { viewModel.dismissTranscriptionState() }
+    )
   }
 
   val bundleActionButtons: @Composable () -> Unit = {
@@ -460,6 +498,7 @@ fun BuildScreen(viewModel: MainViewModel) {
           contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
           verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+          item { voiceDictationCard() }
           item {
             RecentPromptsHistoryCard(
               history = recentHistory,
@@ -549,6 +588,7 @@ fun BuildScreen(viewModel: MainViewModel) {
       ) {
         item { monitorCard() }
         item { quickActionsRow() }
+        item { voiceDictationCard() }
         item {
           RecentPromptsHistoryCard(
             history = recentHistory,
@@ -750,7 +790,7 @@ private fun ChecklistItem(title: String, isOk: Boolean, note: String) {
   ) {
     Icon(
       imageVector = if (isOk) Icons.Default.CheckCircle else Icons.Default.Cancel,
-      contentDescription = null,
+      contentDescription = if (isOk) "$title passed" else "$title needs attention",
       tint = if (isOk) StudioWinner else StudioMiss,
       modifier = Modifier.size(16.dp)
     )
@@ -758,6 +798,229 @@ private fun ChecklistItem(title: String, isOk: Boolean, note: String) {
     Column {
       Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = TextPrimary)
       Text(note, style = MaterialTheme.typography.labelSmall, color = if (isOk) TextSecondary else StudioMiss)
+    }
+  }
+}
+
+@Composable
+private fun BuildVoiceTranscriptionCard(
+  state: TranscriptionUiState,
+  onToggleDictate: (TranscriptionTarget) -> Unit,
+  onApplyToLyrics: (String) -> Unit,
+  onApplyToStyle: (String) -> Unit,
+  onRetry: () -> Unit,
+  onDismiss: () -> Unit
+) {
+  val isRecording = state is TranscriptionUiState.Recording
+  val isTranscribing = state is TranscriptionUiState.Transcribing
+
+  Surface(
+    color = StudioCard,
+    shape = RoundedCornerShape(12.dp),
+    modifier = Modifier
+      .fillMaxWidth()
+      .border(1.dp, StudioCyan.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+      .testTag("build_mic_transcribe_card")
+  ) {
+    Column(modifier = Modifier.padding(12.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.Default.Mic,
+            contentDescription = "Microphone dictation",
+            tint = AmberGold,
+            modifier = Modifier.size(16.dp)
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = "VOICE HOOK & PROMPT DICTATION",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = AmberGold
+          )
+        }
+        Surface(
+          color = StudioCardElevated,
+          shape = RoundedCornerShape(4.dp)
+        ) {
+          Text(
+            text = "GEMINI-3.5-TRANSCRIBE",
+            style = MonospaceMetric.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+            color = StudioCyan,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        val recordingLyrics = state is TranscriptionUiState.Recording && state.target == TranscriptionTarget.BUILD_LYRICS
+        val recordingStyle = state is TranscriptionUiState.Recording && state.target == TranscriptionTarget.BUILD_STYLE
+
+        Button(
+          onClick = { onToggleDictate(TranscriptionTarget.BUILD_LYRICS) },
+          enabled = !isTranscribing && (!isRecording || recordingLyrics),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = if (recordingLyrics) StudioMiss else StudioCardElevated
+          ),
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .weight(1f)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics {
+              contentDescription = if (recordingLyrics) "Stop dictating lyrics hook" else "Dictate lyrics hook with microphone"
+            }
+            .testTag("action_build_dictate_lyrics")
+        ) {
+          Icon(
+            imageVector = if (recordingLyrics) Icons.Default.Stop else Icons.Default.RecordVoiceOver,
+            contentDescription = null,
+            tint = if (recordingLyrics) Color.White else AmberGold,
+            modifier = Modifier.size(16.dp)
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = if (recordingLyrics) "Stop (${state.dbLevel.toInt()}dB)" else "Dictate Lyrics",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = if (recordingLyrics) Color.White else TextPrimary
+          )
+        }
+
+        Button(
+          onClick = { onToggleDictate(TranscriptionTarget.BUILD_STYLE) },
+          enabled = !isTranscribing && (!isRecording || recordingStyle),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = if (recordingStyle) StudioMiss else StudioCardElevated
+          ),
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .weight(1f)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics {
+              contentDescription = if (recordingStyle) "Stop dictating style cue" else "Dictate style cue with microphone"
+            }
+            .testTag("action_build_dictate_style")
+        ) {
+          Icon(
+            imageVector = if (recordingStyle) Icons.Default.Stop else Icons.Default.GraphicEq,
+            contentDescription = null,
+            tint = if (recordingStyle) Color.White else StudioCyan,
+            modifier = Modifier.size(16.dp)
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = if (recordingStyle) "Stop (${state.dbLevel.toInt()}dB)" else "Dictate Style",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = if (recordingStyle) Color.White else TextPrimary
+          )
+        }
+      }
+
+      when (state) {
+        is TranscriptionUiState.Transcribing -> {
+          Spacer(modifier = Modifier.height(8.dp))
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(color = StudioCyan, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = "Transcribing microphone audio via gemini-3.5-transcribe...",
+              style = MaterialTheme.typography.labelSmall,
+              color = StudioCyan
+            )
+          }
+        }
+
+        is TranscriptionUiState.Error -> {
+          Spacer(modifier = Modifier.height(8.dp))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = state.message,
+              style = MaterialTheme.typography.labelSmall,
+              color = StudioMiss,
+              modifier = Modifier.weight(1f)
+            )
+            if (state.canRetry) {
+              TextButton(
+                onClick = onRetry,
+                modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+              ) {
+                Text("Retry", color = AmberGold, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+              }
+            }
+          }
+        }
+
+        is TranscriptionUiState.Success -> {
+          Spacer(modifier = Modifier.height(8.dp))
+          Surface(
+            color = StudioBg,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .testTag("build_transcript_result")
+          ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text("TRANSCRIBED AUDIO", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = StudioWinner)
+                IconButton(
+                  onClick = onDismiss,
+                  modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                ) {
+                  Icon(Icons.Default.Close, contentDescription = "Dismiss transcript", tint = TextMuted, modifier = Modifier.size(16.dp))
+                }
+              }
+              Text(
+                text = "\"${state.text}\"",
+                style = MonospacePrompt.copy(fontSize = 12.sp),
+                color = TextPrimary
+              )
+              Spacer(modifier = Modifier.height(8.dp))
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                OutlinedButton(
+                  onClick = { onApplyToLyrics(state.text) },
+                  shape = RoundedCornerShape(8.dp),
+                  modifier = Modifier
+                    .weight(1f)
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .testTag("action_apply_transcript_lyrics")
+                ) {
+                  Text("Insert to Lyrics", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+                }
+                OutlinedButton(
+                  onClick = { onApplyToStyle(state.text) },
+                  shape = RoundedCornerShape(8.dp),
+                  modifier = Modifier
+                    .weight(1f)
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .testTag("action_apply_transcript_style")
+                ) {
+                  Text("Add to Style", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+                }
+              }
+            }
+          }
+        }
+
+        else -> Unit
+      }
     }
   }
 }

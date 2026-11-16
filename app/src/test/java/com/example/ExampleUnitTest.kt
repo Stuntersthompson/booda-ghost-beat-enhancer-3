@@ -580,4 +580,55 @@ class ExampleUnitTest {
     assertTrue(diff.sliderDeltas.first { it.label == "Audio Infl." }.changed)
     assertFalse(diff.sliderDeltas.first { it.label == "Lane" }.changed)
   }
+
+  @Test
+  fun test_suno_compliance_per_rule_autofix_and_caps_preserve_end() {
+    val overlongStyle = "Hard dark beat no vocals " + "word ".repeat(230)
+    val overlongLyrics = "[Intro]\n" + "line\n".repeat(1300)
+    val snapshot = ComplianceSnapshot(
+      jobType = JobType.PRESERVE,
+      stylePrompt = overlongStyle,
+      lyricsMap = overlongLyrics,
+      excludeText = "muddy mix " + "noise ".repeat(200),
+      variety = 25,
+      weirdness = 25,
+      styleInfluence = 70,
+      audioInfluence = 55
+    )
+
+    val initialAudit = SunoComplianceAuditor.audit(
+      jobType = snapshot.jobType,
+      stylePrompt = snapshot.stylePrompt,
+      lyricsMap = snapshot.lyricsMap,
+      excludeText = snapshot.excludeText,
+      variety = snapshot.variety,
+      audioInfluence = snapshot.audioInfluence
+    )
+    assertEquals("0/5 rules should pass when all 5 violations exist", 0, initialAudit.passedCount)
+
+    // Individual rule repairs
+    val fixedLock = SunoComplianceAuditor.autoFixRule(ComplianceRuleId.PRESERVE_LOCK_LINE, snapshot, "Trap")
+    assertTrue(fixedLock.stylePrompt.contains(LOCK_LINE))
+
+    val fixedSliders = SunoComplianceAuditor.autoFixRule(ComplianceRuleId.PRESERVE_SLIDERS, snapshot, "Trap")
+    assertEquals(0, fixedSliders.variety)
+    assertEquals(80, fixedSliders.audioInfluence)
+
+    // Batch fix all 5 violations simultaneously and verify character caps keep LOCK_LINE and [End]
+    val allFixed = SunoComplianceAuditor.autoFixAll(snapshot, "Trap")
+    val postAudit = SunoComplianceAuditor.audit(
+      jobType = allFixed.jobType,
+      stylePrompt = allFixed.stylePrompt,
+      lyricsMap = allFixed.lyricsMap,
+      excludeText = allFixed.excludeText,
+      variety = allFixed.variety,
+      audioInfluence = allFixed.audioInfluence
+    )
+    assertTrue("All 5 rules should pass after autoFixAll", postAudit.allPassed)
+    assertEquals(5, postAudit.passedCount)
+    assertTrue(allFixed.lyricsMap.trim().endsWith("[End]"))
+    assertTrue(allFixed.lyricsMap.length <= com.example.data.model.LYRICS_LIMIT)
+    assertTrue(allFixed.stylePrompt.length <= com.example.data.model.STYLE_LIMIT)
+    assertTrue(allFixed.excludeText.length <= com.example.data.model.EXCLUDE_LIMIT)
+  }
 }

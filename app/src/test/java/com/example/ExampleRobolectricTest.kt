@@ -19,6 +19,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import android.content.Intent
 import com.example.ai.GeminiBeatService
+import com.example.ai.GroundedSource
 import com.example.ai.configureAppCheck
 import com.example.audio.AudioAnalysisResult
 import com.example.audio.AudioAnalyzer
@@ -31,7 +32,9 @@ import com.example.data.repository.CuratedPrompts
 import com.example.data.repository.PromptBankRepository
 import com.example.data.repository.PromptHistoryRepository
 import com.example.data.repository.StudioPreferencesRepository
+import com.example.ui.components.AudioMeterCard
 import com.example.ui.screens.AdvisorScreen
+import com.example.ui.screens.BuildScreen
 import com.example.ui.screens.LanesScreen
 import com.example.ui.screens.StyleGeneratorScreen
 import com.example.ui.screens.TakesScreen
@@ -984,6 +987,145 @@ class ExampleRobolectricTest {
     assertTrue(id1 > 0 && id2 > 0)
     assertEquals(StudioTab.BUILD, vm.currentTab.value)
     assertTrue(vm.stylePrompt.value.contains("Trap drums"))
+  }
+
+  @Test
+  fun testAudioAnalyzerSubBandBpmAndMajorMinorKeyConfidence() {
+    val analyzer = AudioAnalyzer(context)
+    val sampleRate = 44100
+
+    // 1. Multi-band 120 BPM drum groove (70 Hz kick + 2.4 kHz snare/hat transient) over 8 seconds
+    val durSec = 8
+    val groove120 = FloatArray(sampleRate * durSec)
+    val interval120 = (sampleRate * 60.0 / 120.0).toInt()
+    for (i in groove120.indices) {
+      val beatIdx = i / interval120
+      val posInBeat = i % interval120
+      val kickEnv = if (posInBeat < 3200) (1.0 - posInBeat / 3200.0) else 0.0
+      val kick = sin(2.0 * PI * 75.0 * i / sampleRate) * kickEnv * 0.65
+      val hatEnv = if (beatIdx % 2 == 1 && posInBeat < 1600) (1.0 - posInBeat / 1600.0) else 0.0
+      val snareSnap = sin(2.0 * PI * 2400.0 * i / sampleRate) * hatEnv * 0.45
+      groove120[i] = (kick + snareSnap).toFloat().coerceIn(-1f, 1f)
+    }
+
+    val res120 = analyzer.analyzeFloatSamples("multi_band_120bpm.wav", groove120, sampleRate)
+    val bpm120 = res120.bpm ?: 0.0
+    assertTrue("Sub-band ACF should detect 120 BPM within +-2.5, got $bpm120", kotlin.math.abs(bpm120 - 120.0) <= 2.5)
+    assertEquals("high", res120.bpmConfidence)
+    assertTrue("bpmConfidenceScore should be strong (>= 0.50), got ${res120.bpmConfidenceScore}", res120.bpmConfidenceScore >= 0.50)
+
+    // 2. A minor harmonic chord (A3=220Hz, C4=261.63Hz, E4=329.63Hz + harmonics) -> Key=A, Mode=Minor
+    val minorChord = FloatArray(sampleRate * 3) { i ->
+      val t = i.toDouble() / sampleRate
+      ((sin(2.0 * PI * 220.0 * t) +
+        sin(2.0 * PI * 261.63 * t) +
+        sin(2.0 * PI * 329.63 * t) +
+        0.4 * sin(2.0 * PI * 440.0 * t)) * 0.24).toFloat()
+    }
+    val minorRes = analyzer.analyzeFloatSamples("amin_chord.wav", minorChord, sampleRate)
+    assertEquals("A", minorRes.key)
+    assertEquals("Minor", minorRes.mode)
+    assertEquals("A minor", minorRes.keyName)
+    assertTrue("keyConfidenceScore should be > 0.45, got ${minorRes.keyConfidenceScore}", minorRes.keyConfidenceScore > 0.45)
+  }
+
+  @Test
+  fun testAudioMeterCardDisplaysNumericConfidencePercentagesForBpmKeyAndMode() {
+    val sampleResult = AudioAnalysisResult(
+      fileName = "pocket_sample.wav",
+      durationSec = 12.0,
+      bpm = 128.0,
+      bpmConfidence = "high",
+      keyName = "F# minor",
+      keyClear = true,
+      rmsDb = -15.0,
+      peakDb = -1.5,
+      lowShare = 0.45,
+      centroidHz = 2100.0,
+      onsetRate = 2.5,
+      suggestedLane = "Trap",
+      pocketLabel = "128 BPM · Dark · Sub-heavy",
+      promptPreserve = "$LOCK_LINE. Add Trap drums.",
+      promptOriginal = "Trap instrumental, 128 BPM.",
+      key = "F#",
+      mode = "Minor",
+      bpmConfidenceScore = 0.91,
+      keyConfidenceScore = 0.84
+    )
+
+    composeTestRule.setContent {
+      BooDaBeatTheme {
+        AudioMeterCard(analysis = sampleResult, onBpmMultiplier = {})
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("meter_bpm_confidence").assertTextEquals("91%")
+    composeTestRule.onNodeWithTag("meter_key_confidence").assertTextEquals("84%")
+    composeTestRule.onNodeWithTag("meter_mode_confidence").assertTextEquals("MINOR · 84%")
+  }
+
+  @Test
+  fun testGeminiServiceTranscriptSanitizerAndSearchGroundingDeduplication() {
+    val service = GeminiBeatService()
+    val messy = "  \"Hold   on   to   the   light   tonight\"  \n\n  "
+    assertEquals("Hold on to the light tonight", service.sanitizeTranscript(messy, maxChars = 120))
+    assertEquals("Hold on to", service.sanitizeTranscript(messy, maxChars = 10))
+
+    val grounded = service.buildSearchGroundedAnswer(
+      query = "  Suno v6 Extend best practices  ",
+      answerText = "Use Variety 0 and lock Audio Influence near 80%.",
+      webQueries = listOf("Suno v6 Extend guide", "Suno v6 Extend guide", ""),
+      rawSources = listOf(
+        GroundedSource("Suno Guide", "https://example.com/suno"),
+        GroundedSource("Duplicate", "https://example.com/suno"),
+        GroundedSource("No URL", "")
+      )
+    )
+    assertEquals("Suno v6 Extend best practices", grounded.query)
+    assertEquals(listOf("Suno v6 Extend guide"), grounded.webSearchQueries)
+    assertEquals(1, grounded.sources.size)
+    assertEquals("Suno Guide", grounded.sources.first().title)
+  }
+
+  @Test
+  fun testBuildScreenDictationCardAndApplyTranscriptPreservesEndTag() {
+    val app = ApplicationProvider.getApplicationContext<Application>()
+    val vm = MainViewModel(app)
+
+    vm.applyTranscriptToLyrics("We rise up through the night")
+    assertTrue(vm.lyricsMap.value.contains("[Hook (Dictated)] We rise up through the night"))
+    assertTrue(vm.lyricsMap.value.trimEnd().endsWith("[End]"))
+
+    composeTestRule.setContent {
+      BooDaBeatTheme {
+        BuildScreen(viewModel = vm)
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("build_mic_transcribe_card").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("action_build_dictate_lyrics").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("action_build_dictate_style").assertIsDisplayed()
+  }
+
+  @Test
+  fun testAdvisorScreenDisplaysSearchGroundedResearchCard() {
+    val app = ApplicationProvider.getApplicationContext<Application>()
+    val vm = MainViewModel(app)
+
+    composeTestRule.setContent {
+      BooDaBeatTheme {
+        AdvisorScreen(viewModel = vm)
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("live_audit_report_card").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("advisor_list").performScrollToNode(hasTestTag("advisor_research_card"))
+    composeTestRule.onNodeWithTag("advisor_research_card").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("input_advisor_research").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("action_advisor_research_search").assertIsDisplayed()
   }
 }
 

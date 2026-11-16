@@ -30,7 +30,11 @@ data class AudioAnalysisResult(
   val promptOriginal: String,
   val sampleWordsText: String? = null,
   val sampleWordsKind: String? = null,
-  val waveformPeaks: List<Float> = emptyList()
+  val waveformPeaks: List<Float> = emptyList(),
+  val key: String? = null,
+  val mode: String? = null,
+  val bpmConfidenceScore: Double = 0.0,
+  val keyConfidenceScore: Double = 0.0
 ) {
   val waveformPeaksArray: FloatArray by lazy(LazyThreadSafetyMode.NONE) {
     waveformPeaks.toFloatArray()
@@ -42,6 +46,26 @@ data class AnalyzedClipOutput(
   val multimodalWavBytes: ByteArray?
 )
 
+internal data class TempoEstimate(
+  val bpm: Double?,
+  val confidenceLabel: String,
+  val confidenceScore: Double,
+  val onsetRate: Double
+)
+
+internal data class KeyEstimate(
+  val key: String?,
+  val mode: String?,
+  val keyName: String?,
+  val clear: Boolean,
+  val confidenceScore: Double
+)
+
+/**
+ * Production-grade multi-frame DSP engine with pre-allocated FFT/window workspace buffers.
+ * Computes container-accurate mono downmix, 24-frame Hann-windowed chromagram key/mode estimation,
+ * and 3-sub-band spectral energy-flux lag autocorrelation (60–176 BPM) with parabolic peak interpolation.
+ */
 class AudioAnalyzer(private val context: Context) {
 
   private data class DecodedAudio(
@@ -49,9 +73,41 @@ class AudioAnalyzer(private val context: Context) {
     val sampleRate: Int
   )
 
-  private val NOTE_NAMES = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
-  private val MAJOR_PROFILE = doubleArrayOf(6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88)
-  private val MINOR_PROFILE = doubleArrayOf(6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)
+  private companion object {
+    const val SPECTRAL_FFT_SIZE = 2048
+    const val CHROMA_FFT_SIZE = 4096
+    const val TEMPO_FFT_SIZE = 1024
+    const val TEMPO_HOP_SIZE = 512
+    const val SUB_BAND_COUNT = 3
+    const val TARGET_ANALYSIS_FRAMES = 24
+  }
+
+  private val noteNames = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+  private val majorProfile = doubleArrayOf(6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88)
+  private val minorProfile = doubleArrayOf(6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)
+
+  // Pre-allocated DSP workspace buffers (protected by synchronized access during CPU analysis)
+  private val spectralHammingWindow = DoubleArray(SPECTRAL_FFT_SIZE) { i ->
+    0.54 - 0.46 * cos(2.0 * PI * i / (SPECTRAL_FFT_SIZE - 1))
+  }
+  private val spectralReal = DoubleArray(SPECTRAL_FFT_SIZE)
+  private val spectralImag = DoubleArray(SPECTRAL_FFT_SIZE)
+
+  private val chromaHannWindow = DoubleArray(CHROMA_FFT_SIZE) { i ->
+    0.5 * (1.0 - cos(2.0 * PI * i / (CHROMA_FFT_SIZE - 1)))
+  }
+  private val chromaReal = DoubleArray(CHROMA_FFT_SIZE)
+  private val chromaImag = DoubleArray(CHROMA_FFT_SIZE)
+  private val chromaAccumulator = DoubleArray(12)
+  private val normalizedChroma = DoubleArray(12)
+
+  private val tempoHannWindow = DoubleArray(TEMPO_FFT_SIZE) { i ->
+    0.5 * (1.0 - cos(2.0 * PI * i / (TEMPO_FFT_SIZE - 1)))
+  }
+  private val tempoReal = DoubleArray(TEMPO_FFT_SIZE)
+  private val tempoImag = DoubleArray(TEMPO_FFT_SIZE)
+  private val bandCurrentEnergy = DoubleArray(SUB_BAND_COUNT)
+  private val bandPrevEnergy = DoubleArray(SUB_BAND_COUNT)
 
   suspend fun analyzeAudioUri(uri: Uri, fileName: String): AudioAnalysisResult =
     analyzeAudioUriWithClip(uri, fileName).result
@@ -75,8 +131,9 @@ class AudioAnalyzer(private val context: Context) {
   }
 
   /**
-   * Synchronous DSP entry point for tests and CPU-bound analysis.
+   * Synchronous thread-safe DSP entry point for unit tests and audio buffers.
    */
+  @Synchronized
   fun analyzeFloatSamples(fileName: String, samples: FloatArray, sampleRate: Int): AudioAnalysisResult {
     if (samples.isEmpty() || sampleRate <= 0) {
       return fallbackResult(fileName)
@@ -95,10 +152,9 @@ class AudioAnalyzer(private val context: Context) {
     val peakDb = if (peak > 1e-5) 20.0 * log10(peak) else -80.0
 
     val (lowShare, centroidHz) = calculateSpectralFeatures(samples, sampleRate)
-    val (keyName, keyClear) = estimateMusicalKey(samples, sampleRate)
-    val (estimatedBpm, confidence, onsetRate) = estimateTempo(samples, sampleRate)
+    val keyEstimate = estimateMusicalKeyDetailed(samples, sampleRate)
+    val tempoEstimate = estimateTempoDetailed(samples, sampleRate)
 
-    // Extract 100-bucket groove waveform peaks across the full audio duration
     val numBuckets = 100
     val bucketSize = max(1, samples.size / numBuckets)
     val peaks = ArrayList<Float>(numBuckets)
@@ -113,8 +169,8 @@ class AudioAnalyzer(private val context: Context) {
       peaks.add(bPeak.coerceIn(0.06f, 1.0f))
     }
 
-    val resolvedBpm = estimatedBpm ?: 130.0
-    val suggestedLane = rankBestLane(resolvedBpm, centroidHz, lowShare, onsetRate)
+    val resolvedBpm = tempoEstimate.bpm ?: 130.0
+    val suggestedLane = rankBestLane(resolvedBpm, centroidHz, lowShare, tempoEstimate.onsetRate)
     val pocketLabel = "${resolvedBpm.roundToInt()} BPM · ${if (centroidHz > 2800) "Bright" else "Dark"} · ${if (lowShare > 0.36) "Sub-heavy" else "Balanced"}"
 
     val promptPreserve = "$LOCK_LINE. Add tight $suggestedLane drums underneath only, spice only, sample stays lead."
@@ -123,26 +179,30 @@ class AudioAnalyzer(private val context: Context) {
     return AudioAnalysisResult(
       fileName = fileName,
       durationSec = durationSec,
-      bpm = estimatedBpm,
-      bpmConfidence = confidence,
-      keyName = keyName,
-      keyClear = keyClear,
+      bpm = tempoEstimate.bpm,
+      bpmConfidence = tempoEstimate.confidenceLabel,
+      keyName = keyEstimate.keyName,
+      keyClear = keyEstimate.clear,
       rmsDb = rmsDb,
       peakDb = peakDb,
       lowShare = lowShare,
       centroidHz = centroidHz,
-      onsetRate = onsetRate,
+      onsetRate = tempoEstimate.onsetRate,
       suggestedLane = suggestedLane,
       pocketLabel = pocketLabel,
       promptPreserve = promptPreserve,
       promptOriginal = promptOriginal,
-      waveformPeaks = peaks
+      waveformPeaks = peaks,
+      key = keyEstimate.key,
+      mode = keyEstimate.mode,
+      bpmConfidenceScore = tempoEstimate.confidenceScore,
+      keyConfidenceScore = keyEstimate.confidenceScore
     )
   }
 
   /**
-   * Downsamples/normalizes float audio to compact 16 kHz mono 16-bit WAV (max 15s = ~480 KB)
-   * for multimodal Gemini audio analysis well inside inline payload limits.
+   * Downsamples/normalizes float audio to compact 16 kHz mono 16-bit WAV
+   * well inside Firebase AI inline payload limits (< 20 MB).
    */
   fun encodeWav16KhzMono(
     samples: FloatArray,
@@ -157,7 +217,6 @@ class AudioAnalyzer(private val context: Context) {
     val dataBytes = estimatedOutSamples * 2
     val out = ByteArrayOutputStream(44 + dataBytes)
 
-    // Write RIFF/WAVE header (little-endian PCM 16-bit mono)
     fun writeAscii(s: String) {
       for (ch in s) out.write(ch.code)
     }
@@ -176,13 +235,13 @@ class AudioAnalyzer(private val context: Context) {
     writeIntLE(36 + dataBytes)
     writeAscii("WAVE")
     writeAscii("fmt ")
-    writeIntLE(16) // PCM subchunk size
-    writeShortLE(1) // PCM format
-    writeShortLE(1) // Mono channel
+    writeIntLE(16)
+    writeShortLE(1)
+    writeShortLE(1)
     writeIntLE(targetRate)
-    writeIntLE(targetRate * 2) // Byte rate
-    writeShortLE(2) // Block align
-    writeShortLE(16) // Bits per sample
+    writeIntLE(targetRate * 2)
+    writeShortLE(2)
+    writeShortLE(16)
     writeAscii("data")
     writeIntLE(dataBytes)
 
@@ -200,23 +259,15 @@ class AudioAnalyzer(private val context: Context) {
   }
 
   /**
-   * Multi-frame Hamming-windowed FFT spectral analysis sampled evenly across the track,
-   * skipping near-silent frames and reusing pre-allocated arrays to avoid GC churn.
+   * Multi-frame Hamming-windowed FFT spectral analysis across up to 24 evenly spaced active frames
+   * using pre-allocated FFT workspace buffers.
    */
   internal fun calculateSpectralFeatures(samples: FloatArray, sampleRate: Int): Pair<Double, Double> {
-    val fftSize = 2048
-    if (samples.size < fftSize) return Pair(0.35, 2500.0)
+    if (samples.size < SPECTRAL_FFT_SIZE) return Pair(0.35, 2500.0)
 
-    val maxStart = samples.size - fftSize
-    val targetFrames = 24
-    val frameStep = max(fftSize / 2, maxStart / max(1, targetFrames - 1))
-
-    val hamming = DoubleArray(fftSize) { i ->
-      0.54 - 0.46 * cos(2.0 * PI * i / (fftSize - 1))
-    }
-    val real = DoubleArray(fftSize)
-    val imag = DoubleArray(fftSize)
-    val binWidth = sampleRate.toDouble() / fftSize
+    val maxStart = samples.size - SPECTRAL_FFT_SIZE
+    val frameStep = max(SPECTRAL_FFT_SIZE / 2, maxStart / max(1, TARGET_ANALYSIS_FRAMES - 1))
+    val binWidth = sampleRate.toDouble() / SPECTRAL_FFT_SIZE
 
     var lowEnergyTotal = 0.0
     var totalEnergyTotal = 0.0
@@ -224,21 +275,20 @@ class AudioAnalyzer(private val context: Context) {
     var activeFrames = 0
 
     var offset = 0
-    while (offset <= maxStart && activeFrames < targetFrames) {
+    while (offset <= maxStart && activeFrames < TARGET_ANALYSIS_FRAMES) {
       var frameSumSq = 0.0
-      for (i in 0 until fftSize) {
+      for (i in 0 until SPECTRAL_FFT_SIZE) {
         val s = samples[offset + i].toDouble()
         frameSumSq += s * s
-        real[i] = s * hamming[i]
-        imag[i] = 0.0
+        spectralReal[i] = s * spectralHammingWindow[i]
+        spectralImag[i] = 0.0
       }
 
-      // Skip near-silent intro/outro frames (under -60 dBFS) unless no louder frames exist
-      val frameRms = sqrt(frameSumSq / fftSize)
+      val frameRms = sqrt(frameSumSq / SPECTRAL_FFT_SIZE)
       if (frameRms > 1e-3) {
-        fftRadix2(real, imag)
-        for (k in 1 until fftSize / 2) {
-          val mag = hypot(real[k], imag[k])
+        fftRadix2(spectralReal, spectralImag)
+        for (k in 1 until SPECTRAL_FFT_SIZE / 2) {
+          val mag = hypot(spectralReal[k], spectralImag[k])
           val freq = k * binWidth
           totalEnergyTotal += mag
           weightedFreqTotal += (mag * freq)
@@ -261,82 +311,141 @@ class AudioAnalyzer(private val context: Context) {
   }
 
   /**
-   * Hann-windowed multi-frame Krumhansl-Schmuckler chromagram key detector sampled
-   * evenly across the track instead of only reading the first 10 consecutive frames.
+   * Hann-windowed chromagram key and mode detector analyzing up to 24 evenly spaced active frames
+   * and correlating pitch-class energy against major and minor profiles.
    */
-  internal fun estimateMusicalKey(samples: FloatArray, sampleRate: Int): Pair<String?, Boolean> {
-    val windowSize = 4096
-    if (samples.size < windowSize) return Pair("C minor", false)
-
-    val chroma = DoubleArray(12)
-    val hann = DoubleArray(windowSize) { i ->
-      0.5 * (1.0 - cos(2.0 * PI * i / (windowSize - 1)))
+  internal fun estimateMusicalKeyDetailed(samples: FloatArray, sampleRate: Int): KeyEstimate {
+    if (samples.size < CHROMA_FFT_SIZE) {
+      return KeyEstimate(key = "C", mode = "Minor", keyName = "C minor", clear = false, confidenceScore = 0.35)
     }
-    val real = DoubleArray(windowSize)
-    val imag = DoubleArray(windowSize)
 
-    val maxStart = samples.size - windowSize
-    val targetFrames = 24
-    val frameStep = max(windowSize / 2, maxStart / max(1, targetFrames - 1))
-    val binWidth = sampleRate.toDouble() / windowSize
+    chromaAccumulator.fill(0.0)
 
-    var offset = 0
-    var count = 0
-    while (offset <= maxStart && count < targetFrames) {
-      var energySum = 0.0
-      for (i in 0 until windowSize) {
-        val s = samples[offset + i].toDouble()
-        energySum += s * s
-        real[i] = s * hann[i]
-        imag[i] = 0.0
-      }
+    val maxStart = samples.size - CHROMA_FFT_SIZE
+    val activeOffsets = collectActiveFrameOffsets(
+      samples = samples,
+      windowSize = CHROMA_FFT_SIZE,
+      targetFrames = TARGET_ANALYSIS_FRAMES,
+      minEnergyThreshold = 1e-6
+    )
 
-      if (energySum / windowSize > 1e-6) {
-        fftRadix2(real, imag)
-        for (k in 1 until windowSize / 2) {
-          val freq = k * binWidth
-          if (freq in 65.0..2000.0) {
-            val mag = hypot(real[k], imag[k])
-            val midi = (12.0 * log2(freq / 440.0) + 69.0).roundToInt()
-            val pitchClass = (midi % 12 + 12) % 12
-            chroma[pitchClass] += mag * mag
-          }
+    val binWidth = sampleRate.toDouble() / CHROMA_FFT_SIZE
+    val effectiveOffsets = if (activeOffsets.isNotEmpty()) {
+      activeOffsets
+    } else {
+      val fallbackStep = max(CHROMA_FFT_SIZE / 2, maxStart / max(1, TARGET_ANALYSIS_FRAMES - 1))
+      buildList {
+        var off = 0
+        while (off <= maxStart && size < TARGET_ANALYSIS_FRAMES) {
+          add(off)
+          off += fallbackStep
         }
       }
-      count++
-      offset += frameStep
     }
 
-    val sum = chroma.sum()
-    if (sum <= 1e-12) return Pair(null, false)
-    val normChroma = DoubleArray(12) { chroma[it] / sum }
+    for (offset in effectiveOffsets) {
+      for (i in 0 until CHROMA_FFT_SIZE) {
+        chromaReal[i] = samples[offset + i].toDouble() * chromaHannWindow[i]
+        chromaImag[i] = 0.0
+      }
+
+      fftRadix2(chromaReal, chromaImag)
+      for (k in 1 until CHROMA_FFT_SIZE / 2) {
+        val freq = k * binWidth
+        if (freq in 65.0..2000.0) {
+          val mag = hypot(chromaReal[k], chromaImag[k])
+          val midi = (12.0 * log2(freq / 440.0) + 69.0).roundToInt()
+          val pitchClass = (midi % 12 + 12) % 12
+          chromaAccumulator[pitchClass] += mag * mag
+        }
+      }
+    }
+
+    var sum = 0.0
+    for (v in chromaAccumulator) sum += v
+    if (sum <= 1e-12) {
+      return KeyEstimate(key = null, mode = null, keyName = null, clear = false, confidenceScore = 0.0)
+    }
+    for (i in 0 until 12) {
+      normalizedChroma[i] = chromaAccumulator[i] / sum
+    }
 
     var bestScore = -Double.MAX_VALUE
     var secondScore = -Double.MAX_VALUE
-    var bestKey = "C minor"
+    var bestRoot = "C"
+    var bestMode = "Minor"
 
     for (root in 0 until 12) {
-      val majScore = correlate(normChroma, MAJOR_PROFILE, root)
+      val majScore = correlate(normalizedChroma, majorProfile, root)
       if (majScore > bestScore) {
         secondScore = bestScore
         bestScore = majScore
-        bestKey = "${NOTE_NAMES[root]} major"
+        bestRoot = noteNames[root]
+        bestMode = "Major"
       } else if (majScore > secondScore) {
         secondScore = majScore
       }
 
-      val minScore = correlate(normChroma, MINOR_PROFILE, root)
+      val minScore = correlate(normalizedChroma, minorProfile, root)
       if (minScore > bestScore) {
         secondScore = bestScore
         bestScore = minScore
-        bestKey = "${NOTE_NAMES[root]} minor"
+        bestRoot = noteNames[root]
+        bestMode = "Minor"
       } else if (minScore > secondScore) {
         secondScore = minScore
       }
     }
 
-    val clear = (bestScore - secondScore) > 0.07 && bestScore > 0.50
-    return Pair(bestKey, clear)
+    val margin = (bestScore - secondScore).coerceAtLeast(0.0)
+    val confidenceScore = ((bestScore.coerceIn(0.0, 1.0) * 0.65) + ((margin / 0.30).coerceIn(0.0, 1.0) * 0.35))
+      .coerceIn(0.0, 1.0)
+    val clear = margin > 0.07 && bestScore > 0.50
+
+    return KeyEstimate(
+      key = bestRoot,
+      mode = bestMode,
+      keyName = "$bestRoot ${bestMode.lowercase()}",
+      clear = clear,
+      confidenceScore = round(confidenceScore * 1000.0) / 1000.0
+    )
+  }
+
+  internal fun estimateMusicalKey(samples: FloatArray, sampleRate: Int): Pair<String?, Boolean> {
+    val est = estimateMusicalKeyDetailed(samples, sampleRate)
+    return Pair(est.keyName, est.clear)
+  }
+
+  private fun collectActiveFrameOffsets(
+    samples: FloatArray,
+    windowSize: Int,
+    targetFrames: Int,
+    minEnergyThreshold: Double
+  ): List<Int> {
+    val maxStart = samples.size - windowSize
+    if (maxStart < 0) return emptyList()
+    val probeStep = max(windowSize / 2, maxStart / max(1, (targetFrames * 3) - 1))
+    val candidates = ArrayList<Int>(targetFrames * 3)
+    var off = 0
+    while (off <= maxStart) {
+      var energySum = 0.0
+      // Sample every 4th point for fast silence screening
+      var i = 0
+      while (i < windowSize) {
+        val s = samples[off + i].toDouble()
+        energySum += s * s
+        i += 4
+      }
+      if (energySum / (windowSize / 4) > minEnergyThreshold) {
+        candidates.add(off)
+      }
+      off += probeStep
+    }
+    if (candidates.size <= targetFrames) return candidates
+    return List(targetFrames) { idx ->
+      val mappedIndex = (idx.toLong() * (candidates.size - 1) / (targetFrames - 1)).toInt()
+      candidates[mappedIndex]
+    }
   }
 
   private fun correlate(chroma: DoubleArray, profile: DoubleArray, root: Int): Double {
@@ -364,51 +473,94 @@ class AudioAnalyzer(private val context: Context) {
   }
 
   /**
-   * Lag-autocorrelation tempo tracker computed on a half-wave rectified multi-frame energy
-   * novelty curve over candidate hip-hop/electronic tempos (60..176 BPM).
+   * Sub-band spectral energy-flux lag autocorrelation over 60–176 BPM with parabolic peak interpolation.
+   * Bands: Low Kick/Sub (20–180 Hz), Mid Snare/Chop (180–1400 Hz), High Hats/Transients (1400–6500 Hz).
    */
-  internal fun estimateTempo(samples: FloatArray, sampleRate: Int): Triple<Double?, String, Double> {
-    val hopSize = 512
-    val numHops = samples.size / hopSize
+  internal fun estimateTempoDetailed(samples: FloatArray, sampleRate: Int): TempoEstimate {
+    val numHops = (samples.size - TEMPO_FFT_SIZE) / TEMPO_HOP_SIZE + 1
     val durationSec = samples.size.toDouble() / sampleRate
-    if (numHops < 24 || durationSec < 0.8) {
-      return Triple(130.0, "medium", 2.0)
+    if (samples.size < TEMPO_FFT_SIZE || numHops < 24 || durationSec < 0.8) {
+      return TempoEstimate(bpm = 130.0, confidenceLabel = "medium", confidenceScore = 0.45, onsetRate = 2.0)
     }
 
-    val energy = DoubleArray(numHops)
+    val binWidth = sampleRate.toDouble() / TEMPO_FFT_SIZE
+    val lowMinBin = max(1, (20.0 / binWidth).toInt())
+    val lowMaxBin = max(lowMinBin, (180.0 / binWidth).toInt().coerceAtMost(TEMPO_FFT_SIZE / 2 - 1))
+    val midMinBin = min(TEMPO_FFT_SIZE / 2 - 1, lowMaxBin + 1)
+    val midMaxBin = max(midMinBin, (1400.0 / binWidth).toInt().coerceAtMost(TEMPO_FFT_SIZE / 2 - 1))
+    val highMinBin = min(TEMPO_FFT_SIZE / 2 - 1, midMaxBin + 1)
+    val highMaxBin = max(highMinBin, (6500.0 / binWidth).toInt().coerceAtMost(TEMPO_FFT_SIZE / 2 - 1))
+
+    val bandNovelty = Array(SUB_BAND_COUNT) { DoubleArray(numHops) }
+    val bandMeans = DoubleArray(SUB_BAND_COUNT)
+    val combinedNovelty = DoubleArray(numHops)
+    bandPrevEnergy.fill(0.0)
+
     for (h in 0 until numHops) {
-      var e = 0.0
-      val start = h * hopSize
-      for (i in 0 until hopSize) {
-        val s = samples[start + i].toDouble()
-        e += s * s
+      val frameOffset = h * TEMPO_HOP_SIZE
+      for (i in 0 until TEMPO_FFT_SIZE) {
+        tempoReal[i] = samples[frameOffset + i].toDouble() * tempoHannWindow[i]
+        tempoImag[i] = 0.0
       }
-      energy[h] = sqrt(e / hopSize)
+
+      fftRadix2(tempoReal, tempoImag)
+
+      var lowMagSq = 0.0
+      for (k in lowMinBin..lowMaxBin) {
+        lowMagSq += tempoReal[k] * tempoReal[k] + tempoImag[k] * tempoImag[k]
+      }
+      var midMagSq = 0.0
+      for (k in midMinBin..midMaxBin) {
+        midMagSq += tempoReal[k] * tempoReal[k] + tempoImag[k] * tempoImag[k]
+      }
+      var highMagSq = 0.0
+      for (k in highMinBin..highMaxBin) {
+        highMagSq += tempoReal[k] * tempoReal[k] + tempoImag[k] * tempoImag[k]
+      }
+
+      // Log-compressed sub-band energies preserve kick, snare, and hi-hat transients together
+      bandCurrentEnergy[0] = ln(1.0 + 12.0 * sqrt(lowMagSq / max(1, lowMaxBin - lowMinBin + 1)))
+      bandCurrentEnergy[1] = ln(1.0 + 12.0 * sqrt(midMagSq / max(1, midMaxBin - midMinBin + 1)))
+      bandCurrentEnergy[2] = ln(1.0 + 12.0 * sqrt(highMagSq / max(1, highMaxBin - highMinBin + 1)))
+
+      if (h > 0) {
+        var frameNovelty = 0.0
+        for (b in 0 until SUB_BAND_COUNT) {
+          val diff = bandCurrentEnergy[b] - bandPrevEnergy[b]
+          val pos = if (diff > 0.0) diff else 0.0
+          bandNovelty[b][h] = pos
+          bandMeans[b] += pos
+          frameNovelty += pos
+        }
+        combinedNovelty[h] = frameNovelty
+      }
+
+      for (b in 0 until SUB_BAND_COUNT) {
+        bandPrevEnergy[b] = bandCurrentEnergy[b]
+      }
     }
 
-    // Half-wave rectified novelty curve + adaptive threshold onset counter
-    val novelty = DoubleArray(numHops)
-    var noveltyMean = 0.0
-    for (h in 1 until numHops) {
-      val diff = energy[h] - energy[h - 1]
-      val pos = if (diff > 0.0) diff else 0.0
-      novelty[h] = pos
-      noveltyMean += pos
+    val denomFrames = max(1, numHops - 1)
+    for (b in 0 until SUB_BAND_COUNT) {
+      bandMeans[b] /= denomFrames
     }
-    noveltyMean /= max(1, numHops - 1)
+
+    var combinedMean = 0.0
+    for (h in 1 until numHops) combinedMean += combinedNovelty[h]
+    combinedMean /= denomFrames
 
     var onsets = 0
-    val adaptiveThresh = max(1e-4, noveltyMean * 2.1)
+    val adaptiveThresh = max(1e-4, combinedMean * 2.05)
     var lastOnsetHop = -4
     for (h in 1 until numHops) {
-      if (novelty[h] > adaptiveThresh && (h - lastOnsetHop) >= 3) {
+      if (combinedNovelty[h] > adaptiveThresh && (h - lastOnsetHop) >= 3) {
         onsets++
         lastOnsetHop = h
       }
     }
     val onsetRate = if (durationSec > 0.0) onsets / durationSec else 2.0
 
-    val frameRate = sampleRate.toDouble() / hopSize
+    val frameRate = sampleRate.toDouble() / TEMPO_HOP_SIZE
     val minBpm = 60
     val maxBpm = 176
     val minLag = max(12, floor(60.0 * frameRate / maxBpm).toInt())
@@ -416,66 +568,115 @@ class AudioAnalyzer(private val context: Context) {
 
     if (maxLag <= minLag) {
       val fallbackBpm = (onsetRate * 60.0).coerceIn(70.0, 165.0)
-      return Triple(round(fallbackBpm * 10.0) / 10.0, "low", round(onsetRate * 10.0) / 10.0)
+      return TempoEstimate(
+        bpm = round(fallbackBpm * 10.0) / 10.0,
+        confidenceLabel = "low",
+        confidenceScore = 0.25,
+        onsetRate = round(onsetRate * 10.0) / 10.0
+      )
     }
 
-    // Normalize zero-mean novelty curve for autocorrelation
-    var zeroEnergySum = 0.0
-    for (v in novelty) {
-      val centered = v - noveltyMean
-      zeroEnergySum += centered * centered
-    }
-    if (zeroEnergySum <= 1e-12) {
-      return Triple(130.0, "low", round(onsetRate * 10.0) / 10.0)
+    val bandZeroEnergy = DoubleArray(SUB_BAND_COUNT)
+    var totalActiveBandVar = 0.0
+    for (b in 0 until SUB_BAND_COUNT) {
+      var sumSqZero = 0.0
+      val curve = bandNovelty[b]
+      val mean = bandMeans[b]
+      for (i in 0 until numHops) {
+        val c = curve[i] - mean
+        sumSqZero += c * c
+      }
+      bandZeroEnergy[b] = sumSqZero
+      if (sumSqZero > 1e-10) {
+        totalActiveBandVar += sumSqZero
+      }
     }
 
-    val acf = DoubleArray(maxLag + 2)
+    if (totalActiveBandVar <= 1e-10) {
+      return TempoEstimate(
+        bpm = 130.0,
+        confidenceLabel = "low",
+        confidenceScore = 0.20,
+        onsetRate = round(onsetRate * 10.0) / 10.0
+      )
+    }
+
+    val bandWeights = DoubleArray(SUB_BAND_COUNT)
+    val bandPriors = doubleArrayOf(0.45, 0.35, 0.20)
+    var weightSum = 0.0
+    for (b in 0 until SUB_BAND_COUNT) {
+      if (bandZeroEnergy[b] > 1e-10) {
+        val w = bandPriors[b] * (0.35 + 0.65 * (bandZeroEnergy[b] / totalActiveBandVar))
+        bandWeights[b] = w
+        weightSum += w
+      }
+    }
+    if (weightSum <= 1e-12) weightSum = 1.0
+    for (b in 0 until SUB_BAND_COUNT) {
+      bandWeights[b] /= weightSum
+    }
+
+    val combinedAcf = DoubleArray(maxLag + 2)
     var bestLag = minLag
     var bestScore = -Double.MAX_VALUE
 
     for (lag in minLag..maxLag) {
-      var corr = 0.0
       val count = numHops - lag
-      for (i in 0 until count) {
-        corr += (novelty[i] - noveltyMean) * (novelty[i + lag] - noveltyMean)
+      var combinedNorm = 0.0
+      for (b in 0 until SUB_BAND_COUNT) {
+        val w = bandWeights[b]
+        if (w <= 0.0) continue
+        val curve = bandNovelty[b]
+        val mean = bandMeans[b]
+        var corr = 0.0
+        for (i in 0 until count) {
+          corr += (curve[i] - mean) * (curve[i + lag] - mean)
+        }
+        val normB = (corr * numHops) / (count.toDouble() * bandZeroEnergy[b])
+        combinedNorm += w * normB
       }
-      // Normalize by active overlap length so longer lags are fairly compared
-      val rawNorm = (corr * numHops) / (count.toDouble() * zeroEnergySum)
+
+      combinedAcf[lag] = combinedNorm
       val candidateBpm = 60.0 * frameRate / lag
-      // Gentle perceptual weighting centered around common hip-hop pocket (~118 BPM)
-      val priorWeight = exp(-0.5 * ((ln(candidateBpm / 118.0)) / 0.42).pow(2.0))
-      val weighted = rawNorm * (0.75 + 0.25 * priorWeight)
-      acf[lag] = rawNorm
+      // Gentle tempo pocket prior prevents locking onto half-tempo subharmonics
+      val priorWeight = exp(-0.5 * (ln(candidateBpm / 120.0) / 0.42).pow(2.0))
+      val weighted = combinedNorm * (0.75 + 0.25 * priorWeight)
       if (weighted > bestScore) {
         bestScore = weighted
         bestLag = lag
       }
     }
 
-    // Parabolic interpolation around bestLag for sub-frame BPM accuracy
-    val y0 = acf[(bestLag - 1).coerceAtLeast(minLag)]
-    val y1 = acf[bestLag]
-    val y2 = acf[(bestLag + 1).coerceAtMost(maxLag)]
+    val y0 = combinedAcf[(bestLag - 1).coerceAtLeast(minLag)]
+    val y1 = combinedAcf[bestLag]
+    val y2 = combinedAcf[(bestLag + 1).coerceAtMost(maxLag)]
     val denom = 2.0 * (y0 - 2.0 * y1 + y2)
     val delta = if (abs(denom) > 1e-9) ((y0 - y2) / denom).coerceIn(-0.5, 0.5) else 0.0
     var refinedBpm = 60.0 * frameRate / (bestLag + delta)
 
-    // Clamp rare extreme sub/super multiples cleanly
     while (refinedBpm < 65.0) refinedBpm *= 2.0
     while (refinedBpm > 175.0) refinedBpm /= 2.0
 
     val peakNorm = y1.coerceIn(0.0, 1.0)
-    val confidence = when {
-      peakNorm >= 0.38 && durationSec >= 3.0 -> "high"
-      peakNorm >= 0.18 -> "medium"
+    val durationFactor = (durationSec / 6.0).coerceIn(0.25, 1.0)
+    val confidenceScore = (peakNorm * 0.85 + durationFactor * 0.15).coerceIn(0.0, 1.0)
+    val confidenceLabel = when {
+      peakNorm >= 0.35 && durationSec >= 3.0 -> "high"
+      peakNorm >= 0.16 -> "medium"
       else -> "low"
     }
 
-    return Triple(
-      round(refinedBpm * 10.0) / 10.0,
-      confidence,
-      round(onsetRate * 10.0) / 10.0
+    return TempoEstimate(
+      bpm = round(refinedBpm * 10.0) / 10.0,
+      confidenceLabel = confidenceLabel,
+      confidenceScore = round(confidenceScore * 1000.0) / 1000.0,
+      onsetRate = round(onsetRate * 10.0) / 10.0
     )
+  }
+
+  internal fun estimateTempo(samples: FloatArray, sampleRate: Int): Triple<Double?, String, Double> {
+    val est = estimateTempoDetailed(samples, sampleRate)
+    return Triple(est.bpm, est.confidenceLabel, est.onsetRate)
   }
 
   private fun rankBestLane(bpm: Double, centroid: Double, lowShare: Double, density: Double): String {
@@ -495,8 +696,8 @@ class AudioAnalyzer(private val context: Context) {
   }
 
   /**
-   * Decodes any Android content URI audio stream, preserving its real sample rate
-   * and downmixing multi-channel interleaved PCM frames cleanly into mono Floats.
+   * Decodes any Android content URI audio stream using its container sample rate and channel count,
+   * downmixing interleaved multi-channel PCM cleanly into mono Floats.
    */
   private fun decodeAudioUri(uri: Uri): DecodedAudio {
     val extractor = MediaExtractor()
@@ -667,7 +868,11 @@ class AudioAnalyzer(private val context: Context) {
       pocketLabel = "130 BPM · Balanced · Sub-heavy",
       promptPreserve = "$LOCK_LINE. Add tight Trap drums underneath only, spice only, sample stays lead.",
       promptOriginal = "Trap instrumental, 130 BPM, heavy 808, crisp percussion, full arrangement.",
-      waveformPeaks = generateGroovePeaks()
+      waveformPeaks = generateGroovePeaks(),
+      key = "C",
+      mode = "Minor",
+      bpmConfidenceScore = 0.65,
+      keyConfidenceScore = 0.72
     )
   }
 

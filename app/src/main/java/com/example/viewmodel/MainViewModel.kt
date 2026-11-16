@@ -12,6 +12,11 @@ import androidx.lifecycle.viewModelScope
 import com.example.ai.AiBeatConsultation
 import com.example.ai.AiConsultationUiState
 import com.example.ai.GeminiBeatService
+import com.example.ai.SearchGroundingUiState
+import com.example.ai.TranscriptionTarget
+import com.example.ai.TranscriptionUiState
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import com.example.audio.AudioAnalysisResult
 import com.example.audio.AudioAnalyzer
 import com.example.audio.AudioRecorder
@@ -175,7 +180,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val _aiConsultationState = MutableStateFlow<AiConsultationUiState>(AiConsultationUiState.Idle)
   val aiConsultationState: StateFlow<AiConsultationUiState> = _aiConsultationState.asStateFlow()
 
+  private val _micTranscriptionState = MutableStateFlow<TranscriptionUiState>(TranscriptionUiState.Idle)
+  val micTranscriptionState: StateFlow<TranscriptionUiState> = _micTranscriptionState.asStateFlow()
+
+  private val _searchGroundingState = MutableStateFlow<SearchGroundingUiState>(SearchGroundingUiState.Idle)
+  val searchGroundingState: StateFlow<SearchGroundingUiState> = _searchGroundingState.asStateFlow()
+
   private var lastAnalyzedWavBytes: ByteArray? = null
+  private var lastTranscriptionWavBytes: ByteArray? = null
+  private var lastTranscriptionTarget: TranscriptionTarget = TranscriptionTarget.ANALYZE_SAMPLE_WORDS
 
   private val _complianceUndoSnapshot = MutableStateFlow<ComplianceSnapshot?>(null)
   val complianceUndoSnapshot: StateFlow<ComplianceSnapshot?> = _complianceUndoSnapshot.asStateFlow()
@@ -456,17 +469,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private suspend fun runAiBeatConsultation(result: AudioAnalysisResult, wavBytes: ByteArray?) {
     _aiConsultationState.value = AiConsultationUiState.Loading(
       if (wavBytes != null && wavBytes.isNotEmpty()) {
-        "Listening to audio & consulting Gemini 3.8 Flash..."
+        "Listening to audio & consulting Gemini 3.8 Flash + Search Grounding..."
       } else {
-        "Analyzing DSP metrics with Gemini 3.8 Flash..."
+        "Analyzing DSP metrics with Gemini 3.8 Flash + Search Grounding..."
       }
     )
     try {
-      val consultation = geminiService.consultBeatAnalyst(
-        analysis = result,
-        jobType = _jobType.value.value,
-        audioBytes = wavBytes
-      )
+      val consultation = coroutineScope {
+        val coreDeferred = async {
+          geminiService.consultBeatAnalyst(
+            analysis = result,
+            jobType = _jobType.value.value,
+            audioBytes = wavBytes
+          )
+        }
+        val groundedDeferred = async {
+          try {
+            geminiService.fetchGroundedBeatContext(result, _jobType.value.value)
+          } catch (e: CancellationException) {
+            throw e
+          } catch (_: Exception) {
+            null
+          }
+        }
+        val core = coreDeferred.await()
+        val grounded = groundedDeferred.await()
+        if (grounded != null) {
+          core.copy(
+            searchGroundingSummary = grounded.answer.take(260),
+            groundedSources = grounded.sources,
+            groundedQueries = grounded.webSearchQueries
+          )
+        } else {
+          core
+        }
+      }
       _aiConsultation.value = consultation
       _aiConsultationState.value = AiConsultationUiState.Success(consultation)
 
@@ -506,6 +543,158 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         canRetry = true
       )
     }
+  }
+
+  fun startMicTranscription(target: TranscriptionTarget) {
+    if (_isRecording.value) return
+    audioPlayer.stop()
+    val started = audioRecorder.startRecording { peak, db ->
+      _recordingPeak.value = peak
+      _recordingDb.value = db
+      _micTranscriptionState.value = TranscriptionUiState.Recording(target, db)
+    }
+    if (!started) {
+      _micTranscriptionState.value = TranscriptionUiState.Error(
+        message = "Microphone unavailable or permission denied.",
+        target = target,
+        canRetry = false
+      )
+      return
+    }
+    _isRecording.value = true
+    lastTranscriptionTarget = target
+    _micTranscriptionState.value = TranscriptionUiState.Recording(target, -60f)
+
+    viewModelScope.launch {
+      val samples = audioRecorder.recordAudio(maxDurationSec = 12) { peak, db, _ ->
+        _recordingPeak.value = peak
+        _recordingDb.value = db
+        _micTranscriptionState.value = TranscriptionUiState.Recording(target, db)
+      }
+      _isRecording.value = false
+      if (samples.isEmpty()) {
+        _micTranscriptionState.value = TranscriptionUiState.Error(
+          message = "No audio captured from microphone.",
+          target = target,
+          canRetry = true
+        )
+        return@launch
+      }
+      val wavBytes = audioAnalyzer.encodeWav16KhzMono(samples, 44100, maxSeconds = 12)
+      lastTranscriptionWavBytes = wavBytes
+      executeTranscription(wavBytes, target)
+    }
+  }
+
+  fun stopMicTranscription() {
+    audioRecorder.stopRecording()
+    _isRecording.value = false
+  }
+
+  fun retryLastTranscription() {
+    val wavBytes = lastTranscriptionWavBytes ?: return
+    val target = lastTranscriptionTarget
+    viewModelScope.launch {
+      executeTranscription(wavBytes, target)
+    }
+  }
+
+  fun dismissTranscriptionState() {
+    if (!_isRecording.value) {
+      _micTranscriptionState.value = TranscriptionUiState.Idle
+    }
+  }
+
+  private suspend fun executeTranscription(wavBytes: ByteArray, target: TranscriptionTarget) {
+    _micTranscriptionState.value = TranscriptionUiState.Transcribing(target)
+    try {
+      val transcript = geminiService.transcribeMicrophoneAudio(wavBytes, target)
+      _micTranscriptionState.value = TranscriptionUiState.Success(transcript, target)
+      if (target == TranscriptionTarget.ANALYZE_SAMPLE_WORDS &&
+        !transcript.contains("No intelligible", ignoreCase = true)
+      ) {
+        val kind = if (transcript.length > 18) "Heard clearly" else "Fragment only"
+        setSampleWords(transcript.take(120), kind)
+      }
+    } catch (e: TimeoutCancellationException) {
+      _micTranscriptionState.value = TranscriptionUiState.Error(
+        message = "gemini-3.5-transcribe timed out after 60s. Tap Retry.",
+        target = target,
+        canRetry = true
+      )
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      _micTranscriptionState.value = TranscriptionUiState.Error(
+        message = e.localizedMessage ?: "Audio transcription failed.",
+        target = target,
+        canRetry = true
+      )
+    }
+  }
+
+  fun applyTranscriptToLyrics(transcript: String, context: Context? = null) {
+    val clean = transcript.trim()
+    if (clean.isEmpty()) return
+    val current = _lyricsMap.value.trimEnd()
+    val hasEnd = current.endsWith("[End]")
+    val body = if (hasEnd) current.removeSuffix("[End]").trimEnd() else current
+    val inserted = buildString {
+      if (body.isNotBlank()) {
+        append(body)
+        append("\n")
+      }
+      append("[Hook (Dictated)] ")
+      append(clean)
+      append("\n[End]")
+    }.take(LYRICS_LIMIT)
+    val finalMap = if (inserted.trimEnd().endsWith("[End]")) inserted else {
+      inserted.take((LYRICS_LIMIT - 6).coerceAtLeast(0)).trimEnd() + "\n[End]"
+    }
+    updateLyricsMap(finalMap)
+    if (context != null) {
+      Toast.makeText(context, "Inserted transcribed hook into Lyrics Box", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun applyTranscriptToStyle(transcript: String, context: Context? = null) {
+    val clean = transcript.trim()
+    if (clean.isEmpty()) return
+    val current = _stylePrompt.value.trim()
+    val combined = if (current.isBlank()) clean else "$current, $clean"
+    updateStylePrompt(combined.take(STYLE_LIMIT))
+    if (_jobType.value == JobType.PRESERVE) ensureLockLineInStyle()
+    if (context != null) {
+      Toast.makeText(context, "Added voice note to Style Prompt", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun searchSunoKnowledge(query: String) {
+    val clean = query.trim()
+    if (clean.isEmpty()) return
+    viewModelScope.launch {
+      _searchGroundingState.value = SearchGroundingUiState.Loading(clean)
+      try {
+        val result = geminiService.researchWithGoogleSearch(clean)
+        _searchGroundingState.value = SearchGroundingUiState.Success(result)
+      } catch (e: TimeoutCancellationException) {
+        _searchGroundingState.value = SearchGroundingUiState.Error(
+          message = "Search grounding timed out after 60s. Tap Retry.",
+          query = clean
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        _searchGroundingState.value = SearchGroundingUiState.Error(
+          message = e.localizedMessage ?: "Google Search grounding request failed.",
+          query = clean
+        )
+      }
+    }
+  }
+
+  fun clearSearchGrounding() {
+    _searchGroundingState.value = SearchGroundingUiState.Idle
   }
 
   fun currentComplianceSnapshot(): ComplianceSnapshot {

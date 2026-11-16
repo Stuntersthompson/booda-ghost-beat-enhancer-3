@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -23,12 +25,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ai.AiConsultationUiState
+import com.example.ai.TranscriptionTarget
+import com.example.ai.TranscriptionUiState
 import com.example.audio.AudioAnalysisResult
 import com.example.ui.components.AudioMeterCard
 import com.example.ui.components.RealtimeWaveformVisualizer
@@ -47,6 +55,7 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
   val isAnalyzing by viewModel.isAnalyzing.collectAsStateWithLifecycle()
   val aiConsultation by viewModel.aiConsultation.collectAsStateWithLifecycle()
   val aiConsultationState by viewModel.aiConsultationState.collectAsStateWithLifecycle()
+  val micTranscriptionState by viewModel.micTranscriptionState.collectAsStateWithLifecycle()
   val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
 
   // Draw-scoped state holders (read inside Canvas/drawWithCache to avoid recomposition storms)
@@ -86,6 +95,19 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
   ) { isGranted ->
     if (isGranted) {
       viewModel.startRecording()
+    } else {
+      Toast.makeText(context, "Microphone permission is required for live recording", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  // Permission Launcher for Microphone Speech/Hook Transcription (gemini-3.5-transcribe)
+  val transcribePermissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission()
+  ) { isGranted ->
+    if (isGranted) {
+      viewModel.startMicTranscription(TranscriptionTarget.ANALYZE_SAMPLE_WORDS)
+    } else {
+      Toast.makeText(context, "Microphone permission is required to transcribe audio", Toast.LENGTH_SHORT).show()
     }
   }
 
@@ -174,6 +196,15 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
             SampleHonestyCard(
               analysis = analysis!!,
               heardVocalText = aiConsultation?.heardVocalText,
+              transcriptionState = micTranscriptionState,
+              onToggleTranscribeMic = {
+                if (micTranscriptionState is TranscriptionUiState.Recording) {
+                  viewModel.stopMicTranscription()
+                } else {
+                  transcribePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+              },
+              onRetryTranscribe = { viewModel.retryLastTranscription() },
               onClearWords = { viewModel.setSampleWords(null) },
               onOpenEditWords = {
                 wordsInput = analysis?.sampleWordsText ?: ""
@@ -286,6 +317,15 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
             SampleHonestyCard(
               analysis = analysis!!,
               heardVocalText = aiConsultation?.heardVocalText,
+              transcriptionState = micTranscriptionState,
+              onToggleTranscribeMic = {
+                if (micTranscriptionState is TranscriptionUiState.Recording) {
+                  viewModel.stopMicTranscription()
+                } else {
+                  transcribePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+              },
+              onRetryTranscribe = { viewModel.retryLastTranscription() },
               onClearWords = { viewModel.setSampleWords(null) },
               onOpenEditWords = {
                 wordsInput = analysis?.sampleWordsText ?: ""
@@ -594,9 +634,19 @@ private fun AnalyzedWaveformSection(
 private fun SampleHonestyCard(
   analysis: AudioAnalysisResult,
   heardVocalText: String?,
+  transcriptionState: TranscriptionUiState,
+  onToggleTranscribeMic: () -> Unit,
+  onRetryTranscribe: () -> Unit,
   onClearWords: () -> Unit,
   onOpenEditWords: () -> Unit
 ) {
+  val isRecordingMic = transcriptionState is TranscriptionUiState.Recording &&
+    transcriptionState.target == TranscriptionTarget.ANALYZE_SAMPLE_WORDS
+  val isTranscribingMic = transcriptionState is TranscriptionUiState.Transcribing &&
+    transcriptionState.target == TranscriptionTarget.ANALYZE_SAMPLE_WORDS
+  val transcribeError = (transcriptionState as? TranscriptionUiState.Error)
+    ?.takeIf { it.target == TranscriptionTarget.ANALYZE_SAMPLE_WORDS }
+
   Surface(
     color = StudioCard,
     shape = RoundedCornerShape(12.dp),
@@ -632,7 +682,9 @@ private fun SampleHonestyCard(
       Surface(
         color = StudioBg,
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(vertical = 4.dp)
       ) {
         Column(modifier = Modifier.padding(10.dp)) {
           if (analysis.sampleWordsText != null) {
@@ -665,31 +717,93 @@ private fun SampleHonestyCard(
         }
       }
 
+      if (isTranscribingMic) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          CircularProgressIndicator(color = StudioCyan, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = "Transcribing vocal hook with gemini-3.5-transcribe...",
+            style = MaterialTheme.typography.labelSmall,
+            color = StudioCyan
+          )
+        }
+      } else if (transcribeError != null) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = transcribeError.message,
+            style = MaterialTheme.typography.labelSmall,
+            color = StudioMiss,
+            modifier = Modifier.weight(1f)
+          )
+          if (transcribeError.canRetry) {
+            TextButton(
+              onClick = onRetryTranscribe,
+              modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            ) {
+              Text("Retry", color = AmberGold, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+            }
+          }
+        }
+      }
+
       Spacer(modifier = Modifier.height(6.dp))
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
         verticalAlignment = Alignment.CenterVertically
       ) {
         if (analysis.sampleWordsText != null) {
           TextButton(
             onClick = onClearWords,
-            modifier = Modifier.minimumInteractiveComponentSize()
+            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
           ) {
-            Text("Clear Words", style = MaterialTheme.typography.labelSmall, color = StudioMiss)
+            Text("Clear", style = MaterialTheme.typography.labelSmall, color = StudioMiss)
           }
+        }
+        Button(
+          onClick = onToggleTranscribeMic,
+          enabled = !isTranscribingMic,
+          colors = ButtonDefaults.buttonColors(
+            containerColor = if (isRecordingMic) StudioMiss else StudioCardElevated
+          ),
+          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics {
+              contentDescription = if (isRecordingMic) "Stop microphone transcription" else "Transcribe sample hook from microphone"
+            }
+            .testTag("action_analyze_transcribe_mic")
+        ) {
+          Icon(
+            imageVector = if (isRecordingMic) Icons.Default.Stop else Icons.Default.GraphicEq,
+            contentDescription = null,
+            tint = if (isRecordingMic) Color.White else AmberGold,
+            modifier = Modifier.size(16.dp)
+          )
           Spacer(modifier = Modifier.width(4.dp))
+          Text(
+            text = if (isRecordingMic) "Stop (${(transcriptionState as TranscriptionUiState.Recording).dbLevel.toInt()}dB)" else "Transcribe Mic",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = if (isRecordingMic) Color.White else AmberGold
+          )
         }
         OutlinedButton(
           onClick = onOpenEditWords,
           contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-          shape = RoundedCornerShape(6.dp),
-          modifier = Modifier.minimumInteractiveComponentSize().defaultMinSize(minHeight = 36.dp)
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
         ) {
           Icon(Icons.Default.Edit, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(14.dp))
           Spacer(modifier = Modifier.width(4.dp))
           Text(
-            text = if (analysis.sampleWordsText != null) "Edit Words" else "Type What You Heard",
+            text = if (analysis.sampleWordsText != null) "Edit" else "Type",
             style = MaterialTheme.typography.labelSmall,
             color = StudioCyan
           )
@@ -838,21 +952,67 @@ private fun GeminiAnalystCard(
         )
       }
 
+      val uriHandler = LocalUriHandler.current
       if (!aiConsultation?.searchGroundingSummary.isNullOrBlank()) {
         Spacer(modifier = Modifier.height(8.dp))
         Surface(
           color = StudioBg,
-          shape = RoundedCornerShape(6.dp),
-          modifier = Modifier.fillMaxWidth()
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("analyze_search_grounding_box")
         ) {
-          Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Language, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(6.dp))
+          Column(modifier = Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(Icons.Default.Language, contentDescription = "Google Search Grounding", tint = StudioCyan, modifier = Modifier.size(14.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "SEARCH-GROUNDED SUNO V6 INSIGHT (GEMINI-4-HYDROGEN)",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                color = StudioCyan
+              )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-              text = "Suno v6 Engineering: ${aiConsultation?.searchGroundingSummary}",
+              text = aiConsultation?.searchGroundingSummary.orEmpty(),
               style = MaterialTheme.typography.labelSmall,
-              color = StudioCyan
+              color = TextPrimary
             )
+            val groundedSources = aiConsultation?.groundedSources.orEmpty()
+            if (groundedSources.isNotEmpty()) {
+              Spacer(modifier = Modifier.height(6.dp))
+              groundedSources.take(3).forEach { src ->
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable {
+                      try { uriHandler.openUri(src.uri) } catch (_: Exception) {}
+                    }
+                    .padding(horizontal = 4.dp, vertical = 8.dp)
+                    .semantics { contentDescription = "Open grounded source ${src.title}" },
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text(
+                    text = src.title,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = StudioCyan,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Icon(
+                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                    contentDescription = null,
+                    tint = StudioCyan,
+                    modifier = Modifier.size(14.dp)
+                  )
+                }
+              }
+            }
           }
         }
       }
