@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ai.AiConsultationUiState
 import com.example.audio.AudioAnalysisResult
 import com.example.ui.components.AudioMeterCard
 import com.example.ui.components.RealtimeWaveformVisualizer
@@ -45,6 +46,7 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
   val recordingPeak by viewModel.recordingPeak.collectAsStateWithLifecycle()
   val isAnalyzing by viewModel.isAnalyzing.collectAsStateWithLifecycle()
   val aiConsultation by viewModel.aiConsultation.collectAsStateWithLifecycle()
+  val aiConsultationState by viewModel.aiConsultationState.collectAsStateWithLifecycle()
   val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
 
   // Draw-scoped state holders (read inside Canvas/drawWithCache to avoid recomposition storms)
@@ -185,9 +187,25 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
             GeminiAnalystCard(
               analysis = analysis!!,
               aiConsultation = aiConsultation,
-              onCopyPrompt = { title, prompt -> viewModel.copyToClipboard(context, title, prompt) },
+              aiState = aiConsultationState,
+              onRetryAi = { viewModel.retryAiConsultation() },
+              onCopyPrompt = { title, prompt ->
+                viewModel.copyToClipboard(context, title, prompt)
+                viewModel.recordGeneratedPrompt(
+                  prompt = prompt,
+                  source = "Analyze",
+                  lane = analysis?.suggestedLane ?: activeLane,
+                  bpm = analysis?.bpm?.toInt()
+                )
+              },
               onSendPromptToBuild = { prompt ->
                 viewModel.updateStylePrompt(prompt)
+                viewModel.recordGeneratedPrompt(
+                  prompt = prompt,
+                  source = "Send-to-Build",
+                  lane = analysis?.suggestedLane ?: activeLane,
+                  bpm = analysis?.bpm?.toInt()
+                )
                 viewModel.setTab(StudioTab.BUILD)
               }
             )
@@ -281,9 +299,25 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
             GeminiAnalystCard(
               analysis = analysis!!,
               aiConsultation = aiConsultation,
-              onCopyPrompt = { title, prompt -> viewModel.copyToClipboard(context, title, prompt) },
+              aiState = aiConsultationState,
+              onRetryAi = { viewModel.retryAiConsultation() },
+              onCopyPrompt = { title, prompt ->
+                viewModel.copyToClipboard(context, title, prompt)
+                viewModel.recordGeneratedPrompt(
+                  prompt = prompt,
+                  source = "Analyze",
+                  lane = analysis?.suggestedLane ?: activeLane,
+                  bpm = analysis?.bpm?.toInt()
+                )
+              },
               onSendPromptToBuild = { prompt ->
                 viewModel.updateStylePrompt(prompt)
+                viewModel.recordGeneratedPrompt(
+                  prompt = prompt,
+                  source = "Send-to-Build",
+                  lane = analysis?.suggestedLane ?: activeLane,
+                  bpm = analysis?.bpm?.toInt()
+                )
                 viewModel.setTab(StudioTab.BUILD)
               }
             )
@@ -669,6 +703,8 @@ private fun SampleHonestyCard(
 private fun GeminiAnalystCard(
   analysis: AudioAnalysisResult,
   aiConsultation: com.example.ai.AiBeatConsultation?,
+  aiState: AiConsultationUiState,
+  onRetryAi: () -> Unit,
   onCopyPrompt: (String, String) -> Unit,
   onSendPromptToBuild: (String) -> Unit
 ) {
@@ -680,10 +716,110 @@ private fun GeminiAnalystCard(
       .border(1.dp, StudioBorder, RoundedCornerShape(12.dp))
   ) {
     Column(modifier = Modifier.padding(14.dp)) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("GEMINI MULTIMODAL BEAT ANALYST", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(18.dp))
+          Spacer(modifier = Modifier.width(6.dp))
+          Text("GEMINI MULTIMODAL BEAT ANALYST", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+        }
+        val statusLabel = when (aiState) {
+          is AiConsultationUiState.Loading -> "LIVE"
+          is AiConsultationUiState.Success -> "AI VERIFIED"
+          is AiConsultationUiState.Error -> "ERROR"
+          is AiConsultationUiState.Idle -> "READY"
+        }
+        val statusColor = when (aiState) {
+          is AiConsultationUiState.Loading -> AmberGold
+          is AiConsultationUiState.Success -> StudioWinner
+          is AiConsultationUiState.Error -> StudioMiss
+          is AiConsultationUiState.Idle -> TextMuted
+        }
+        Surface(
+          color = statusColor.copy(alpha = 0.16f),
+          shape = RoundedCornerShape(4.dp)
+        ) {
+          Text(
+            text = statusLabel,
+            style = MonospaceMetric.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+            color = statusColor,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+          )
+        }
+      }
+
+      if (aiState is AiConsultationUiState.Loading) {
+        Spacer(modifier = Modifier.height(10.dp))
+        Surface(
+          color = StudioBg,
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("ai_loading_banner")
+        ) {
+          Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            CircularProgressIndicator(
+              color = StudioCyan,
+              strokeWidth = 2.dp,
+              modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+              text = aiState.stage,
+              style = MaterialTheme.typography.labelMedium,
+              color = StudioCyan
+            )
+          }
+        }
+      } else if (aiState is AiConsultationUiState.Error) {
+        Spacer(modifier = Modifier.height(10.dp))
+        Surface(
+          color = Color(0x22EF4444),
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, StudioMiss.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+            .testTag("ai_error_banner")
+        ) {
+          Column(modifier = Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(Icons.Default.Warning, contentDescription = null, tint = StudioMiss, modifier = Modifier.size(16.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "Cloud AI Consultation Unavailable",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = StudioMiss
+              )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = aiState.message,
+              style = MaterialTheme.typography.bodySmall,
+              color = TextPrimary
+            )
+            if (aiState.canRetry) {
+              Spacer(modifier = Modifier.height(8.dp))
+              Button(
+                onClick = onRetryAi,
+                colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                  .defaultMinSize(minHeight = 48.dp)
+                  .testTag("action_retry_ai_analysis")
+              ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Retry AI Analysis", color = Color.Black)
+              }
+            }
+          }
+        }
       }
 
       Spacer(modifier = Modifier.height(10.dp))
@@ -692,6 +828,15 @@ private fun GeminiAnalystCard(
         style = MaterialTheme.typography.bodyMedium,
         color = TextPrimary
       )
+
+      if (!aiConsultation?.suggestedSettings.isNullOrBlank()) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+          text = aiConsultation?.suggestedSettings.orEmpty(),
+          style = MonospaceMetric.copy(fontSize = 11.sp),
+          color = AmberGoldLight
+        )
+      }
 
       if (!aiConsultation?.searchGroundingSummary.isNullOrBlank()) {
         Spacer(modifier = Modifier.height(8.dp))
@@ -704,7 +849,7 @@ private fun GeminiAnalystCard(
             Icon(Icons.Default.Language, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(14.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-              text = "Suno v6 Grounding: ${aiConsultation?.searchGroundingSummary}",
+              text = "Suno v6 Engineering: ${aiConsultation?.searchGroundingSummary}",
               style = MaterialTheme.typography.labelSmall,
               color = StudioCyan
             )
@@ -736,12 +881,29 @@ private fun GeminiAnalystCard(
                 ) {
                   Text(sug.title, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = AmberGold)
                   Row(verticalAlignment = Alignment.CenterVertically) {
+                    var sugCopiedFlash by remember { mutableStateOf(false) }
+                    LaunchedEffect(sugCopiedFlash) {
+                      if (sugCopiedFlash) {
+                        kotlinx.coroutines.delay(1200L)
+                        sugCopiedFlash = false
+                      }
+                    }
                     Text("${sug.chars} / 200c", style = MonospaceMetric.copy(fontSize = 11.sp), color = StudioCyan)
                     IconButton(
-                      onClick = { onCopyPrompt(sug.title, sug.prompt) },
-                      modifier = Modifier.minimumInteractiveComponentSize()
+                      onClick = {
+                        sugCopiedFlash = true
+                        onCopyPrompt(sug.title, sug.prompt)
+                      },
+                      modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("action_copy_ai_suggestion_${sug.title.lowercase().replace(" ", "_")}")
                     ) {
-                      Icon(Icons.Default.ContentCopy, contentDescription = "Copy ${sug.title} prompt", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                      Icon(
+                        imageVector = if (sugCopiedFlash) Icons.Default.Check else Icons.Default.ContentCopy,
+                        contentDescription = "Copy Prompt: ${sug.title}",
+                        tint = if (sugCopiedFlash) StudioWinner else TextSecondary,
+                        modifier = Modifier.size(16.dp)
+                      )
                     }
                     IconButton(
                       onClick = { onSendPromptToBuild(sug.prompt) },

@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ai.configureAppCheck
 import com.example.ui.components.StudioBottomBar
 import com.example.ui.components.StudioNavigationRail
 import com.example.ui.components.StudioSettingsDrawerSheet
@@ -43,6 +44,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    configureAppCheck(this, intent)
     enableEdgeToEdge()
     setContent {
       BooDaBeatTheme {

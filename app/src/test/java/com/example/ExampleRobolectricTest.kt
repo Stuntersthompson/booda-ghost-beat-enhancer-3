@@ -1,6 +1,7 @@
 package com.example
 
 import android.app.Application
+import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
@@ -12,7 +13,15 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.room.Room
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteOpenHelper
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
+import android.content.Intent
+import com.example.ai.GeminiBeatService
+import com.example.ai.configureAppCheck
+import com.example.audio.AudioAnalysisResult
+import com.example.audio.AudioAnalyzer
 import com.example.data.db.AppDatabase
 import com.example.data.model.JobType
 import com.example.data.model.LOCK_LINE
@@ -20,12 +29,20 @@ import com.example.data.model.SUNO_STYLE_BOX_LIMIT
 import com.example.data.model.TakeEntity
 import com.example.data.repository.CuratedPrompts
 import com.example.data.repository.PromptBankRepository
+import com.example.data.repository.PromptHistoryRepository
 import com.example.data.repository.StudioPreferencesRepository
+import com.example.ui.screens.AdvisorScreen
 import com.example.ui.screens.LanesScreen
+import com.example.ui.screens.StyleGeneratorScreen
+import com.example.ui.screens.TakesScreen
 import com.example.ui.theme.BooDaBeatTheme
 import com.example.viewmodel.MainViewModel
+import com.example.viewmodel.StudioTab
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlin.math.PI
+import kotlin.math.sin
+import org.robolectric.shadows.ShadowToast
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -624,6 +641,349 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("lanes_result_count")
       .assertTextEquals("Showing 41 of 41 lanes")
+  }
+
+  @Test
+  fun testPromptHistoryDaoRolling20CapAndDeduplication() = runBlocking {
+    val historyRepo = PromptHistoryRepository(database.promptHistoryDao())
+
+    // Insert 25 distinct prompt variations with ascending timestamps
+    for (i in 1..25) {
+      historyRepo.recordPrompt(
+        prompt = "Variation #$i: Preserve original soul sample with $i-pattern 808s.",
+        source = if (i % 2 == 0) "Builder" else "Randomize",
+        lane = if (i % 2 == 0) "Trap" else "UK drill",
+        jobType = JobType.PRESERVE,
+        bpm = 130 + (i % 15),
+        createdAt = 1000L + i
+      )
+    }
+
+    // Strictly capped at 20 entries; #1..#5 evicted, #25 newest first, #6 oldest retained
+    val snapshot = historyRepo.getRecentSnapshot()
+    assertEquals(20, snapshot.size)
+    assertEquals(20, historyRepo.getCount())
+    assertTrue(snapshot.first().prompt.startsWith("Variation #25:"))
+    assertTrue(snapshot.last().prompt.startsWith("Variation #6:"))
+    assertFalse(snapshot.any { it.prompt.startsWith("Variation #5:") })
+
+    // Re-recording an existing variation (#10) bumps it to top without creating a duplicate or dropping size below 20
+    historyRepo.recordPrompt(
+      prompt = "Variation #10: Preserve original soul sample with 10-pattern 808s.",
+      source = "Builder",
+      lane = "Trap",
+      jobType = JobType.PRESERVE,
+      bpm = 140,
+      createdAt = 5000L
+    )
+    val afterBump = historyRepo.getRecentSnapshot()
+    assertEquals(20, afterBump.size)
+    assertTrue(afterBump.first().prompt.startsWith("Variation #10:"))
+    assertEquals(1, afterBump.count { it.prompt.startsWith("Variation #10:") })
+
+    // Single delete removes 1 row -> 19
+    historyRepo.deleteEntry(afterBump.first().id)
+    assertEquals(19, historyRepo.getCount())
+
+    // Clear removes remaining rows -> 0
+    historyRepo.clearHistory()
+    assertEquals(0, historyRepo.getCount())
+    assertTrue(historyRepo.recentPrompts.first().isEmpty())
+  }
+
+  @Test
+  fun testDatabaseMigration3To4CreatesPromptHistoryTable() {
+    val config = SupportSQLiteOpenHelper.Configuration.builder(context)
+      .name(null)
+      .callback(object : SupportSQLiteOpenHelper.Callback(3) {
+        override fun onCreate(db: SupportSQLiteDatabase) {
+          db.execSQL(
+            "CREATE TABLE IF NOT EXISTS favorite_prompts (id INTEGER NOT NULL PRIMARY KEY, prompt TEXT NOT NULL, category TEXT NOT NULL, subgenre TEXT NOT NULL, bpmHint TEXT NOT NULL, chars INTEGER NOT NULL, savedAt INTEGER NOT NULL)"
+          )
+        }
+        override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+      })
+      .build()
+
+    val helper = FrameworkSQLiteOpenHelperFactory().create(config)
+    val db = helper.writableDatabase
+    AppDatabase.MIGRATION_3_4.migrate(db)
+
+    db.execSQL(
+      "INSERT INTO prompt_history (prompt, source, lane, jobType, bpm, chars, createdAt) VALUES ('Test prompt', 'Builder', 'Trap', 'preserve', 140, 11, 12345)"
+    )
+    val cursor = db.query("SELECT prompt, source, lane FROM prompt_history")
+    assertTrue(cursor.moveToFirst())
+    assertEquals("Test prompt", cursor.getString(0))
+    assertEquals("Builder", cursor.getString(1))
+    assertEquals("Trap", cursor.getString(2))
+    cursor.close()
+    helper.close()
+  }
+
+  @Test
+  fun testStyleGeneratorCopyIconToastAndHistoryRecallFlow() = runBlocking {
+    val app = ApplicationProvider.getApplicationContext<Application>()
+    val vm = MainViewModel(app)
+    vm.clearPromptHistory()
+    Thread.sleep(150L)
+
+    composeTestRule.setContent {
+      BooDaBeatTheme {
+        StyleGeneratorScreen(viewModel = vm)
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Scroll to Interactive Builder card and tap its dedicated Copy Prompt icon button
+    composeTestRule.onNodeWithTag("style_generator_list")
+      .performScrollToNode(hasTestTag("action_copy_icon_generator_prompt"))
+    composeTestRule.onNodeWithTag("action_copy_icon_generator_prompt")
+      .performClick()
+    Thread.sleep(250L)
+    composeTestRule.waitForIdle()
+
+    // Verify ClipboardManager received the prompt and Toast confirmed copy
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+    assertTrue("Clipboard should contain generated Suno prompt", clipText.contains("Preserve original"))
+    assertEquals("Copied Suno Style Prompt to clipboard", ShadowToast.getTextOfLatestToast())
+
+    // Verify Room history captured it and displays 1 / 20
+    composeTestRule.onNodeWithTag("style_generator_list")
+      .performScrollToIndex(3)
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("recent_prompts_count")
+      .assertTextEquals("1 / 20")
+
+    val savedEntries = vm.historyRepo.getRecentSnapshot()
+    assertEquals(1, savedEntries.size)
+    val entry = savedEntries.first()
+
+    // Tap the Copy Prompt icon button on the saved history card itself
+    composeTestRule.onNodeWithTag("action_copy_history_${entry.id}")
+      .performClick()
+    composeTestRule.waitForIdle()
+    assertEquals("Copied Suno Prompt to clipboard", ShadowToast.getTextOfLatestToast())
+
+    // Mutate Build style prompt away, then tap the history card body to recall it back to Build
+    vm.updateStylePrompt("Temporary overwritten style prompt")
+    vm.setTab(StudioTab.STYLES)
+    composeTestRule.onNodeWithTag("history_prompt_card_${entry.id}")
+      .performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(entry.prompt, vm.stylePrompt.value)
+    assertEquals(StudioTab.BUILD, vm.currentTab.value)
+    assertTrue(ShadowToast.getTextOfLatestToast().contains("Loaded"))
+  }
+
+  @Test
+  fun testAudioAnalyzerMultiFrameDspTempoKeySpectralAndWavEncoder() {
+    val analyzer = AudioAnalyzer(context)
+    val sampleRate = 44100
+
+    // 1. Sub-heavy track with 2 seconds of silent intro, then 90 Hz bass pulses at 140 BPM (8 seconds total)
+    val totalSamples = sampleRate * 8
+    val subTrack = FloatArray(totalSamples)
+    val beatIntervalSamples = (sampleRate * 60.0 / 140.0).toInt()
+    for (i in (sampleRate * 2) until totalSamples) {
+      val posInBeat = (i - sampleRate * 2) % beatIntervalSamples
+      val env = if (posInBeat < 3500) (1f - posInBeat / 3500f) else 0.02f
+      subTrack[i] = (sin(2.0 * PI * 90.0 * i / sampleRate) * env * 0.85).toFloat()
+    }
+
+    val subResult = analyzer.analyzeFloatSamples("140bpm_sub_with_silence.wav", subTrack, sampleRate)
+    assertTrue("Multi-frame spectral must detect sub-heavy lowShare even after silent intro, was ${subResult.lowShare}", subResult.lowShare > 0.60)
+    assertTrue("Sub-bass track centroid should be warm/low, was ${subResult.centroidHz}", subResult.centroidHz < 800.0)
+    val bpm = subResult.bpm ?: 0.0
+    assertTrue("Autocorrelation BPM should lock near 140 BPM (within +-4), got $bpm", kotlin.math.abs(bpm - 140.0) <= 4.0)
+    assertEquals("high", subResult.bpmConfidence)
+
+    // 2. C major chord across 3 seconds -> Hann chromagram should identify C major clearly
+    val chordSamples = FloatArray(sampleRate * 3) { i ->
+      val t = i.toDouble() / sampleRate
+      ((sin(2.0 * PI * 261.63 * t) + sin(2.0 * PI * 329.63 * t) + sin(2.0 * PI * 392.00 * t)) * 0.28).toFloat()
+    }
+    val chordResult = analyzer.analyzeFloatSamples("cmaj_chord.wav", chordSamples, sampleRate)
+    assertEquals("C major", chordResult.keyName)
+
+    // 3. Compact 16kHz WAV encoder produces valid RIFF/WAVE header well under 20MB limit
+    val wavBytes = analyzer.encodeWav16KhzMono(subTrack, sourceSampleRate = sampleRate, maxSeconds = 15)
+    assertTrue(wavBytes.size > 44)
+    assertTrue(wavBytes.size < 18 * 1024 * 1024)
+    assertEquals('R', wavBytes[0].toInt().toChar())
+    assertEquals('I', wavBytes[1].toInt().toChar())
+    assertEquals('F', wavBytes[2].toInt().toChar())
+    assertEquals('F', wavBytes[3].toInt().toChar())
+    assertEquals('W', wavBytes[8].toInt().toChar())
+    assertEquals('A', wavBytes[9].toInt().toChar())
+    assertEquals('V', wavBytes[10].toInt().toChar())
+    assertEquals('E', wavBytes[11].toInt().toChar())
+  }
+
+  @Test
+  fun testGeminiBeatServiceParsesStructuredJsonAndEnforcesCaps() {
+    val service = GeminiBeatService()
+    val analysis = AudioAnalysisResult(
+      fileName = "soul_loop.wav",
+      durationSec = 14.0,
+      bpm = 138.0,
+      bpmConfidence = "high",
+      keyName = "F# minor",
+      keyClear = true,
+      rmsDb = -14.0,
+      peakDb = -1.2,
+      lowShare = 0.48,
+      centroidHz = 2100.0,
+      onsetRate = 2.4,
+      suggestedLane = "Trap",
+      pocketLabel = "138 BPM · Dark · Sub-heavy",
+      promptPreserve = "$LOCK_LINE. Add tight Trap drums.",
+      promptOriginal = "Trap instrumental, 138 BPM."
+    )
+    val overlongPrompt = "Preserve the original sample and sampled vocals exactly as performed. " + "x".repeat(220)
+    val rawJson = """
+      {
+        "vocalText": "Hold on to your faith tonight",
+        "vocalConfidence": "Clear",
+        "tacticalAdvice": "Set Variety 0 and Audio Influence 82.",
+        "recommendedStylePrompt": "$overlongPrompt",
+        "suggestedSettings": "Model v6 · Route: Extend · Variety 0 · Audio Influence 82",
+        "suggestions": [
+          { "title": "808 Bounce", "prompt": "$overlongPrompt", "focusNote": "Heavy sub bounce" }
+        ],
+        "searchGrounding": "Extend locks chopped stems."
+      }
+    """.trimIndent()
+
+    val parsed = service.parseConsultationJson(rawJson, analysis, "preserve")
+    assertEquals("Hold on to your faith tonight", parsed.heardVocalText)
+    assertEquals("Clear", parsed.vocalConfidence)
+    assertTrue(parsed.recommendedStylePrompt.length <= 200)
+    assertEquals(1, parsed.suggestions.size)
+    assertTrue(parsed.suggestions.first().prompt.length <= 200)
+  }
+
+  @Test
+  fun testAppCheckDebugTokenIntentWritesSynchronouslyWithCommit() {
+    val expectedToken = "test-debug-token-xyz-123"
+    val launchIntent = Intent().apply {
+      putExtra("FIREBASE_APPCHECK_DEBUG_TOKEN", expectedToken)
+    }
+
+    configureAppCheck(context, launchIntent)
+
+    val app = com.google.firebase.FirebaseApp.getApps(context).firstOrNull()
+    assertNotNull("FirebaseApp should initialize when google-services.json is configured", app)
+    val persistenceKey = app!!.persistenceKey
+    val prefs = context.getSharedPreferences(
+      "com.google.firebase.appcheck.debug.store.$persistenceKey",
+      Context.MODE_PRIVATE
+    )
+    assertEquals(expectedToken, prefs.getString("com.google.firebase.appcheck.debug.DEBUG_SECRET", null))
+  }
+
+  @Test
+  fun testAdvisorScreenAutoFixAllAndUndoRestoresOriginalPrompts() {
+    val app = ApplicationProvider.getApplicationContext<Application>()
+    val vm = MainViewModel(app)
+    vm.setJobType(JobType.PRESERVE)
+    val brokenStyle = "Bouncy synth chord, no vocals, no drums"
+    val brokenLyrics = "[Intro]\n[Verse 1]"
+    vm.updateStylePrompt(brokenStyle)
+    vm.updateLyricsMap(brokenLyrics)
+    vm.setVariety(35)
+    vm.setAudioInfluence(45)
+
+    composeTestRule.setContent {
+      BooDaBeatTheme {
+        AdvisorScreen(viewModel = vm)
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("advisor_score_badge").assertTextEquals("1/5 PASS")
+    composeTestRule.onNodeWithTag("action_autofix_all").performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("advisor_score_badge").assertTextEquals("5/5 PASS")
+    assertTrue(vm.stylePrompt.value.contains(LOCK_LINE))
+    assertFalse(vm.stylePrompt.value.contains("no vocals", ignoreCase = true))
+    assertTrue(vm.excludeText.value.contains("no vocals", ignoreCase = true))
+    assertTrue(vm.lyricsMap.value.trim().endsWith("[End]"))
+    assertEquals(0, vm.variety.value)
+    assertEquals(80, vm.audioInfluence.value)
+
+    // Undo restores exact prior prompt & slider values cleanly
+    composeTestRule.onNodeWithTag("action_undo_autofix").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(brokenStyle, vm.stylePrompt.value)
+    assertEquals(brokenLyrics, vm.lyricsMap.value)
+    assertEquals(35, vm.variety.value)
+    assertEquals(45, vm.audioInfluence.value)
+  }
+
+  @Test
+  fun testTakesScreenAnalyticsAndABDiffComparisonFlow() = runBlocking {
+    val app = ApplicationProvider.getApplicationContext<Application>()
+    val vm = MainViewModel(app)
+
+    val existing = vm.takeRepo.allTakes.first()
+    existing.forEach { vm.takeRepo.deleteTake(it.id) }
+
+    val id1 = vm.takeRepo.insertTake(
+      TakeEntity(
+        name = "Take Alpha",
+        beatTitle = "Sample Flip",
+        lane = "Trap",
+        jobType = "preserve",
+        bpm = 138.0,
+        style = "$LOCK_LINE. Tight Trap drums and bright hats.",
+        excludeText = "no vocals",
+        lyrics = "[End]",
+        settings = "Model v6 · Route: Extend · Variety 0 · Weirdness 25 · Style 70 · Audio 80",
+        result = "miss"
+      )
+    )
+    val id2 = vm.takeRepo.insertTake(
+      TakeEntity(
+        name = "Take Beta",
+        beatTitle = "Sample Flip",
+        lane = "Trap",
+        jobType = "preserve",
+        bpm = 140.0,
+        style = "$LOCK_LINE. Heavy Trap drums and rolling hats.",
+        excludeText = "no vocals",
+        lyrics = "[End]",
+        settings = "Model v6 · Route: Extend · Variety 0 · Weirdness 30 · Style 70 · Audio 85",
+        result = "winner"
+      )
+    )
+    Thread.sleep(150L)
+
+    composeTestRule.setContent {
+      BooDaBeatTheme {
+        TakesScreen(viewModel = vm)
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("takes_analytics_breakdown").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("takes_list").performScrollToNode(hasTestTag("action_toggle_ab_compare"))
+    composeTestRule.onNodeWithTag("action_toggle_ab_compare").performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("takes_list").performScrollToNode(hasTestTag("takes_ab_diff_card"))
+    composeTestRule.onNodeWithTag("takes_ab_diff_card").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("takes_list").performScrollToNode(hasTestTag("action_load_diff_b"))
+    composeTestRule.onNodeWithTag("action_load_diff_b").performClick()
+    composeTestRule.waitForIdle()
+
+    assertTrue(id1 > 0 && id2 > 0)
+    assertEquals(StudioTab.BUILD, vm.currentTab.value)
+    assertTrue(vm.stylePrompt.value.contains("Trap drums"))
   }
 }
 

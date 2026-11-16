@@ -1,7 +1,15 @@
 package com.example
 
+import com.example.data.model.ComplianceRuleId
+import com.example.data.model.ComplianceSnapshot
 import com.example.data.model.CuratedSunoPrompt
+import com.example.data.model.DiffOp
+import com.example.data.model.JobType
+import com.example.data.model.LOCK_LINE
 import com.example.data.model.SUNO_STYLE_BOX_LIMIT
+import com.example.data.model.SunoComplianceAuditor
+import com.example.data.model.TakeAnalytics
+import com.example.data.model.TakeEntity
 import com.example.data.repository.CuratedPrompts
 import com.example.data.repository.StudioPreferencesRepository
 import com.example.ui.components.PeakHoldConstants
@@ -462,5 +470,114 @@ class ExampleUnitTest {
     assertEquals(0.33f, pausedReleaseFraction, 0.0001f)
     assertFalse("Should remain paused when drag started while paused", shouldResumePaused)
     assertFalse(controller.isScrubbing)
+  }
+
+  @Test
+  fun test_suno_compliance_auditor_flags_fixes_and_supports_undo() {
+    val initial = ComplianceSnapshot(
+      jobType = JobType.PRESERVE,
+      stylePrompt = "Hard 808 bounce, no vocals, without drums",
+      lyricsMap = "[Intro]\n[Verse 1]",
+      excludeText = "muffled mix",
+      variety = 40,
+      weirdness = 25,
+      styleInfluence = 70,
+      audioInfluence = 50
+    )
+
+    val beforeReport = SunoComplianceAuditor.audit(
+      jobType = initial.jobType,
+      stylePrompt = initial.stylePrompt,
+      lyricsMap = initial.lyricsMap,
+      excludeText = initial.excludeText,
+      variety = initial.variety,
+      audioInfluence = initial.audioInfluence
+    )
+    assertFalse(beforeReport.allPassed)
+    assertEquals(1, beforeReport.passedCount) // only CHARACTER_CAPS passes initially
+    assertFalse(beforeReport.checks.first { it.id == ComplianceRuleId.PRESERVE_LOCK_LINE }.passed)
+    assertFalse(beforeReport.checks.first { it.id == ComplianceRuleId.LYRICS_END_CLOSURE }.passed)
+    assertFalse(beforeReport.checks.first { it.id == ComplianceRuleId.NEGATIVE_SEPARATION }.passed)
+    assertFalse(beforeReport.checks.first { it.id == ComplianceRuleId.PRESERVE_SLIDERS }.passed)
+
+    val fixed = SunoComplianceAuditor.autoFixAll(initial, activeLane = "Trap")
+    val afterReport = SunoComplianceAuditor.audit(
+      jobType = fixed.jobType,
+      stylePrompt = fixed.stylePrompt,
+      lyricsMap = fixed.lyricsMap,
+      excludeText = fixed.excludeText,
+      variety = fixed.variety,
+      audioInfluence = fixed.audioInfluence
+    )
+    assertTrue("All 5 Suno v6 rules should pass after autoFixAll", afterReport.allPassed)
+    assertEquals(5, afterReport.passedCount)
+    assertTrue(fixed.stylePrompt.startsWith(LOCK_LINE))
+    assertFalse(fixed.stylePrompt.contains("no vocals", ignoreCase = true))
+    assertFalse(fixed.stylePrompt.contains("without drums", ignoreCase = true))
+    assertTrue(fixed.excludeText.contains("no vocals", ignoreCase = true))
+    assertTrue(fixed.excludeText.contains("drums", ignoreCase = true))
+    assertTrue(fixed.lyricsMap.trim().endsWith("[End]"))
+    assertEquals(0, fixed.variety)
+    assertTrue(fixed.audioInfluence in 75..85)
+  }
+
+  @Test
+  fun test_take_analytics_win_rate_and_ab_word_diff() {
+    val t1 = TakeEntity(
+      id = 10L,
+      name = "Soul Chop v1",
+      beatTitle = "Soul",
+      lane = "Trap",
+      jobType = "preserve",
+      bpm = 138.0,
+      style = "$LOCK_LINE. Add tight Trap drums and crisp hats.",
+      excludeText = "no vocals",
+      lyrics = "[End]",
+      settings = "Model v6 · Route: Extend · Variety 0 · Weirdness 25 · Style 70 · Audio 80",
+      result = "miss"
+    )
+    val t2 = TakeEntity(
+      id = 11L,
+      name = "Soul Chop v2",
+      beatTitle = "Soul",
+      lane = "Trap",
+      jobType = "preserve",
+      bpm = 140.0,
+      style = "$LOCK_LINE. Add heavy Trap drums and rolling hats.",
+      excludeText = "no vocals",
+      lyrics = "[End]",
+      settings = "Model v6 · Route: Extend · Variety 0 · Weirdness 30 · Style 70 · Audio 85",
+      result = "winner"
+    )
+    val t3 = TakeEntity(
+      id = 12L,
+      name = "Drill Test",
+      beatTitle = "Drill",
+      lane = "NY drill",
+      jobType = "original",
+      bpm = 144.0,
+      style = "NY drill instrumental",
+      excludeText = "",
+      lyrics = "[End]",
+      settings = "Model v6 · Route: Create · Variety 0 · Weirdness 20 · Style 65 · Audio 0",
+      result = "winner"
+    )
+
+    val summary = TakeAnalytics.summarize(listOf(t1, t2, t3))
+    assertEquals(3, summary.totalTakes)
+    assertEquals(2, summary.winnerCount)
+    assertEquals(66, summary.overallWinRate)
+    assertEquals(50, summary.preserveStats.winRatePercent)
+    assertEquals(100, summary.originalStats.winRatePercent)
+    assertEquals("NY drill", summary.topLanes.first().lane)
+
+    val diff = TakeAnalytics.compareTakes(t1, t2)
+    assertEquals(2, diff.removedWordCount) // "tight", "crisp"
+    assertEquals(2, diff.addedWordCount)   // "heavy", "rolling"
+    assertTrue(diff.styleDiffTokens.any { it.op == DiffOp.REMOVED && it.text == "tight" })
+    assertTrue(diff.styleDiffTokens.any { it.op == DiffOp.ADDED && it.text == "heavy" })
+    assertTrue(diff.sliderDeltas.first { it.label == "Weirdness" }.changed)
+    assertTrue(diff.sliderDeltas.first { it.label == "Audio Infl." }.changed)
+    assertFalse(diff.sliderDeltas.first { it.label == "Lane" }.changed)
   }
 }

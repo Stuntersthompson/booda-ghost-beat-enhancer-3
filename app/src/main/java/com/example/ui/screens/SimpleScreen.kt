@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.*
@@ -176,11 +177,26 @@ fun SimpleScreen(viewModel: MainViewModel) {
               }
             }
 
+            var simpleCopiedFlash by remember { mutableStateOf(false) }
+            LaunchedEffect(simpleCopiedFlash) {
+              if (simpleCopiedFlash) {
+                kotlinx.coroutines.delay(1200L)
+                simpleCopiedFlash = false
+              }
+            }
             IconButton(
-              onClick = { viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt) },
+              onClick = {
+                simpleCopiedFlash = true
+                viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt)
+              },
               modifier = Modifier.minimumInteractiveComponentSize().testTag("action_copy_simple")
             ) {
-              Icon(Icons.Default.ContentCopy, contentDescription = "Copy Simple Prompt", tint = TextSecondary, modifier = Modifier.size(18.dp))
+              Icon(
+                imageVector = if (simpleCopiedFlash) Icons.Default.Check else Icons.Default.ContentCopy,
+                contentDescription = "Copy Prompt",
+                tint = if (simpleCopiedFlash) StudioWinner else TextSecondary,
+                modifier = Modifier.size(18.dp)
+              )
             }
           }
 

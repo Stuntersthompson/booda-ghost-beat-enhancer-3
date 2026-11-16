@@ -5,10 +5,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +38,13 @@ fun PromptBox(
   val isOverLimit = chars > limit
   val hasLockLine = text.contains(LOCK_LINE)
   val isPreserveMissingLock = isPreserve && !hasLockLine && text.isNotBlank()
+  var isCopiedFlash by remember { mutableStateOf(false) }
+  LaunchedEffect(isCopiedFlash) {
+    if (isCopiedFlash) {
+      delay(1200L)
+      isCopiedFlash = false
+    }
+  }
 
   Surface(
     color = StudioCard,
@@ -82,15 +91,18 @@ fun PromptBox(
             Spacer(modifier = Modifier.width(6.dp))
           }
           IconButton(
-            onClick = onCopy,
+            onClick = {
+              isCopiedFlash = true
+              onCopy()
+            },
             modifier = Modifier
               .minimumInteractiveComponentSize()
               .testTag("copy_${title.lowercase().replace(" ", "_")}")
           ) {
             Icon(
-              imageVector = Icons.Default.ContentCopy,
-              contentDescription = "Copy $title",
-              tint = TextSecondary,
+              imageVector = if (isCopiedFlash) Icons.Default.Check else Icons.Default.ContentCopy,
+              contentDescription = "Copy Prompt: $title",
+              tint = if (isCopiedFlash) StudioWinner else TextSecondary,
               modifier = Modifier.size(18.dp)
             )
           }

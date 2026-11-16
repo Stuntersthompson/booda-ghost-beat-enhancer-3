@@ -24,6 +24,7 @@ import com.example.audio.PlaybackMath
 import com.example.data.model.*
 import com.example.ui.components.CompactWaveformMeter
 import com.example.ui.components.PromptBox
+import com.example.ui.components.RecentPromptsHistoryCard
 import com.example.ui.components.SettingsCardView
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
@@ -56,6 +57,7 @@ fun BuildScreen(viewModel: MainViewModel) {
   val isLoopingAudio by viewModel.isLoopingAudio.collectAsStateWithLifecycle()
   val isScrubbingAudio by viewModel.isScrubbingAudio.collectAsStateWithLifecycle()
   val handoffStepsDone by viewModel.handoffStepsDone.collectAsStateWithLifecycle()
+  val recentHistory by viewModel.recentPromptHistory.collectAsStateWithLifecycle()
 
   var showSaveModal by rememberSaveable { mutableStateOf(false) }
   var takeNameInput by rememberSaveable { mutableStateOf("") }
@@ -452,12 +454,25 @@ fun BuildScreen(viewModel: MainViewModel) {
           item { preFlightAuditCard() }
         }
 
-        // Right Pane: Prompt Boxes + Copy/Save Bundle
+        // Right Pane: Recent 20 Recall + Prompt Boxes + Copy/Save Bundle
         LazyColumn(
           modifier = Modifier.weight(1.05f).fillMaxHeight(),
           contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
           verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+          item {
+            RecentPromptsHistoryCard(
+              history = recentHistory,
+              onRecallVariation = { entry ->
+                viewModel.recallPromptVariation(entry, navigateToBuild = false, context = context)
+              },
+              onCopyPrompt = { entry ->
+                viewModel.copyToClipboard(context, "Suno Prompt", entry.prompt)
+              },
+              onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
+              onClearAll = { viewModel.clearPromptHistory() }
+            )
+          }
           item {
             PromptBox(
               title = "Style of Music",
@@ -534,6 +549,19 @@ fun BuildScreen(viewModel: MainViewModel) {
       ) {
         item { monitorCard() }
         item { quickActionsRow() }
+        item {
+          RecentPromptsHistoryCard(
+            history = recentHistory,
+            onRecallVariation = { entry ->
+              viewModel.recallPromptVariation(entry, navigateToBuild = false, context = context)
+            },
+            onCopyPrompt = { entry ->
+              viewModel.copyToClipboard(context, "Suno Prompt", entry.prompt)
+            },
+            onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
+            onClearAll = { viewModel.clearPromptHistory() }
+          )
+        }
         item {
           PromptBox(
             title = "Style of Music",

@@ -38,6 +38,7 @@ import com.example.data.model.CuratedSunoPrompt
 import com.example.data.model.JobType
 import com.example.data.model.SUNO_STYLE_BOX_LIMIT
 import com.example.data.repository.CuratedPrompts
+import com.example.ui.components.RecentPromptsHistoryCard
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.StudioTab
@@ -51,10 +52,12 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
   val snackbarHostState = remember { SnackbarHostState() }
 
   val jobType by viewModel.jobType.collectAsStateWithLifecycle()
+  val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
   val bpm by viewModel.audioAnalysis.collectAsStateWithLifecycle()
   val favoriteIds by viewModel.favoriteIds.collectAsStateWithLifecycle()
   val curatedCategory by viewModel.curatedCategory.collectAsStateWithLifecycle()
   val searchQuery by viewModel.curatedSearchQuery.collectAsStateWithLifecycle()
+  val recentHistory by viewModel.recentPromptHistory.collectAsStateWithLifecycle()
 
   // Local query state with 250ms debounce
   var rawSearchInput by rememberSaveable { mutableStateOf(searchQuery) }
@@ -94,6 +97,7 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
   var selectedSample by rememberSaveable { mutableStateOf(sampleOptions[0]) }
   var selectedDrums by rememberSaveable { mutableStateOf(drumOptions[0]) }
   var selectedVibe by rememberSaveable { mutableStateOf(vibeOptions[0]) }
+  var builderInteracted by rememberSaveable { mutableStateOf(false) }
 
   val currentBpm = bpm?.bpm?.toInt() ?: 130
   val isPreserve = jobType == JobType.PRESERVE
@@ -106,6 +110,19 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
       bpm = currentBpm,
       isPreserve = isPreserve
     )
+  }
+
+  LaunchedEffect(generatedPrompt, builderInteracted) {
+    if (builderInteracted) {
+      delay(600L)
+      viewModel.recordGeneratedPrompt(
+        prompt = generatedPrompt,
+        source = "Builder",
+        lane = activeLane,
+        jobType = jobType,
+        bpm = currentBpm
+      )
+    }
   }
 
   // Multi-word AND filter across prompt, category, subgenre, and bpmHint
@@ -296,10 +313,21 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
 
   @Composable
   fun InteractiveBuilderCard() {
+    var builderCopiedFlash by remember { mutableStateOf(false) }
+    LaunchedEffect(builderCopiedFlash) {
+      if (builderCopiedFlash) {
+        delay(1200L)
+        builderCopiedFlash = false
+      }
+    }
+
     Surface(
       color = StudioCard,
       shape = RoundedCornerShape(14.dp),
-      modifier = Modifier.fillMaxWidth().border(1.dp, StudioBorder, RoundedCornerShape(14.dp))
+      modifier = Modifier
+        .fillMaxWidth()
+        .border(1.dp, StudioBorder, RoundedCornerShape(14.dp))
+        .testTag("interactive_style_builder_card")
     ) {
       Column(modifier = Modifier.padding(14.dp)) {
         Row(
@@ -312,16 +340,41 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
             Spacer(modifier = Modifier.width(6.dp))
             Text("INTERACTIVE STYLE BUILDER", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = AmberGold)
           }
-          Surface(
-            color = if (generatedPrompt.length <= SUNO_STYLE_BOX_LIMIT) StudioCardElevated else Color(0x33EF4444),
-            shape = RoundedCornerShape(6.dp)
-          ) {
-            Text(
-              text = "${generatedPrompt.length} / $SUNO_STYLE_BOX_LIMIT c",
-              style = MonospaceMetric.copy(fontSize = 12.sp),
-              color = if (generatedPrompt.length <= SUNO_STYLE_BOX_LIMIT) StudioCyan else StudioMiss,
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-            )
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+              color = if (generatedPrompt.length <= SUNO_STYLE_BOX_LIMIT) StudioCardElevated else Color(0x33EF4444),
+              shape = RoundedCornerShape(6.dp)
+            ) {
+              Text(
+                text = "${generatedPrompt.length} / $SUNO_STYLE_BOX_LIMIT c",
+                style = MonospaceMetric.copy(fontSize = 12.sp),
+                color = if (generatedPrompt.length <= SUNO_STYLE_BOX_LIMIT) StudioCyan else StudioMiss,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              )
+            }
+            IconButton(
+              onClick = {
+                builderCopiedFlash = true
+                viewModel.copyToClipboard(context, "Suno Style Prompt", generatedPrompt)
+                viewModel.recordGeneratedPrompt(
+                  prompt = generatedPrompt,
+                  source = "Builder",
+                  lane = activeLane,
+                  jobType = jobType,
+                  bpm = currentBpm
+                )
+              },
+              modifier = Modifier
+                .minimumInteractiveComponentSize()
+                .testTag("action_copy_icon_generator_prompt")
+            ) {
+              Icon(
+                imageVector = if (builderCopiedFlash) Icons.Default.Check else Icons.Default.ContentCopy,
+                contentDescription = "Copy Prompt",
+                tint = if (builderCopiedFlash) StudioWinner else AmberGold,
+                modifier = Modifier.size(18.dp)
+              )
+            }
           }
         }
 
@@ -331,7 +384,10 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
         Spacer(modifier = Modifier.height(4.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           items(sampleOptions) { s ->
-            ChipOption(text = s.take(28) + "...", isSelected = s == selectedSample) { selectedSample = s }
+            ChipOption(text = s.take(28) + "...", isSelected = s == selectedSample) {
+              selectedSample = s
+              builderInteracted = true
+            }
           }
         }
 
@@ -341,7 +397,10 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
         Spacer(modifier = Modifier.height(4.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           items(drumOptions) { d ->
-            ChipOption(text = d.take(28) + "...", isSelected = d == selectedDrums) { selectedDrums = d }
+            ChipOption(text = d.take(28) + "...", isSelected = d == selectedDrums) {
+              selectedDrums = d
+              builderInteracted = true
+            }
           }
         }
 
@@ -351,7 +410,10 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
         Spacer(modifier = Modifier.height(4.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           items(vibeOptions) { v ->
-            ChipOption(text = v.take(28) + "...", isSelected = v == selectedVibe) { selectedVibe = v }
+            ChipOption(text = v.take(28) + "...", isSelected = v == selectedVibe) {
+              selectedVibe = v
+              builderInteracted = true
+            }
           }
         }
 
@@ -378,16 +440,28 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
         ) {
           Button(
             onClick = {
+              builderCopiedFlash = true
               viewModel.copyToClipboard(context, "Suno Style Prompt", generatedPrompt)
-              viewModel.addRecentPrompt(generatedPrompt)
+              viewModel.recordGeneratedPrompt(
+                prompt = generatedPrompt,
+                source = "Builder",
+                lane = activeLane,
+                jobType = jobType,
+                bpm = currentBpm
+              )
             },
             colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.weight(1f).height(44.dp).testTag("action_copy_generator_prompt")
           ) {
-            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+            Icon(
+              imageVector = if (builderCopiedFlash) Icons.Default.Check else Icons.Default.ContentCopy,
+              contentDescription = null,
+              tint = Color.Black,
+              modifier = Modifier.size(16.dp)
+            )
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Copy Prompt", color = Color.Black)
+            Text(if (builderCopiedFlash) "Copied!" else "Copy Prompt", color = Color.Black)
           }
 
           Button(
@@ -406,6 +480,13 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
           Button(
             onClick = {
               viewModel.updateStylePrompt(generatedPrompt)
+              viewModel.recordGeneratedPrompt(
+                prompt = generatedPrompt,
+                source = "Send-to-Build",
+                lane = activeLane,
+                jobType = jobType,
+                bpm = currentBpm
+              )
               viewModel.setTab(StudioTab.BUILD)
             },
             colors = ButtonDefaults.buttonColors(containerColor = StudioCyan),
@@ -530,13 +611,26 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
       },
       onCopy = {
         viewModel.copyToClipboard(context, "Suno Prompt #${item.id}", item.prompt)
-        viewModel.addRecentPrompt(item.prompt)
+        viewModel.recordGeneratedPrompt(
+          prompt = item.prompt,
+          source = "Curated",
+          lane = item.subgenre,
+          jobType = jobType,
+          bpm = currentBpm
+        )
       },
       onShare = {
         viewModel.sharePrompt(context, "Suno Prompt #${item.id} (${item.subgenre})", item.prompt)
       },
       onUseInBuild = {
         viewModel.updateStylePrompt(item.prompt)
+        viewModel.recordGeneratedPrompt(
+          prompt = item.prompt,
+          source = "Send-to-Build",
+          lane = item.subgenre,
+          jobType = jobType,
+          bpm = currentBpm
+        )
         viewModel.setTab(StudioTab.BUILD)
       }
     )
@@ -558,7 +652,10 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
       ) {
         // Left Pane: Header + Search + Interactive Builder
         LazyColumn(
-          modifier = Modifier.weight(0.95f).fillMaxHeight(),
+          modifier = Modifier
+            .weight(0.95f)
+            .fillMaxHeight()
+            .testTag("style_generator_list"),
           contentPadding = PaddingValues(top = 12.dp, bottom = 32.dp),
           verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -578,6 +675,19 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
           }
           item { SearchAndFilterCard() }
           item { InteractiveBuilderCard() }
+          item {
+            RecentPromptsHistoryCard(
+              history = recentHistory,
+              onRecallVariation = { entry ->
+                viewModel.recallPromptVariation(entry, navigateToBuild = true, context = context)
+              },
+              onCopyPrompt = { entry ->
+                viewModel.copyToClipboard(context, "Suno Prompt", entry.prompt)
+              },
+              onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
+              onClearAll = { viewModel.clearPromptHistory() }
+            )
+          }
         }
 
         // Right Pane: Curated 150-Prompt Bank
@@ -602,7 +712,8 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
       LazyColumn(
         modifier = Modifier
           .fillMaxSize()
-          .padding(horizontal = 14.dp),
+          .padding(horizontal = 14.dp)
+          .testTag("style_generator_list"),
         contentPadding = PaddingValues(top = 10.dp, bottom = 90.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
       ) {
@@ -622,6 +733,19 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
         }
         item { SearchAndFilterCard() }
         item { InteractiveBuilderCard() }
+        item {
+          RecentPromptsHistoryCard(
+            history = recentHistory,
+            onRecallVariation = { entry ->
+              viewModel.recallPromptVariation(entry, navigateToBuild = true, context = context)
+            },
+            onCopyPrompt = { entry ->
+              viewModel.copyToClipboard(context, "Suno Prompt", entry.prompt)
+            },
+            onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
+            onClearAll = { viewModel.clearPromptHistory() }
+          )
+        }
         if (filteredPrompts.isEmpty()) {
           item { CuratedEmptyStateCard() }
         } else {

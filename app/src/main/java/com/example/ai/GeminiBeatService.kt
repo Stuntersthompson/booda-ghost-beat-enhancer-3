@@ -1,16 +1,20 @@
 package com.example.ai
 
+import android.util.Log
 import com.example.audio.AudioAnalysisResult
+import com.example.data.model.JobType
 import com.example.data.model.LOCK_LINE
+import com.google.firebase.Firebase
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.Schema
+import com.google.firebase.ai.type.content
+import com.google.firebase.ai.type.generationConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 data class SunoPromptSuggestion(
   val title: String,
@@ -29,256 +33,230 @@ data class AiBeatConsultation(
   val searchGroundingSummary: String? = null
 )
 
+sealed interface AiConsultationUiState {
+  data object Idle : AiConsultationUiState
+  data class Loading(val stage: String = "Analyzing beat with Gemini 3.8 Flash...") : AiConsultationUiState
+  data class Success(val consultation: AiBeatConsultation) : AiConsultationUiState
+  data class Error(val message: String, val canRetry: Boolean = true) : AiConsultationUiState
+}
+
+/**
+ * Firebase AI Logic client powered by Gemini 3.8 Flash with structured JSON output
+ * and optional multimodal WAV audio attachment (capped strictly under 20 MB).
+ */
 class GeminiBeatService {
 
-  private val client = OkHttpClient.Builder()
-    .connectTimeout(15, TimeUnit.SECONDS)
-    .readTimeout(30, TimeUnit.SECONDS)
-    .build()
+  private companion object {
+    const val TAG = "GeminiBeatService"
+    const val MODEL_NAME = "gemini-3.8-flash"
+    const val AI_TIMEOUT_MS = 60_000L
+    const val MAX_INLINE_AUDIO_BYTES = 18 * 1024 * 1024
+  }
 
-  /**
-   * Transcribe sample vocals using gemini-3.5-transcribe or audio multimodal prompt.
-   * Strictly adheres to the Honesty Law: never invent words, only transcribe heard words or label as fragment/instrumental.
-   */
-  suspend fun transcribeSampleAudio(
-    audioBytes: ByteArray?,
-    mimeType: String = "audio/wav",
-    apiKey: String? = null
-  ): Pair<String, String> = withContext(Dispatchers.IO) {
-    if (audioBytes == null || audioBytes.isEmpty() || apiKey.isNullOrBlank()) {
-      return@withContext Pair("Instrumental stem detected (no speech phrases found)", "None")
-    }
+  private val consultationSchema: Schema by lazy {
+    Schema.obj(
+      properties = mapOf(
+        "vocalText" to Schema.string(
+          description = "Verbatim transcribed vocal phrases if audible, or 'No intelligible vocal phrases detected' if instrumental. Max 120 chars."
+        ),
+        "vocalConfidence" to Schema.enumeration(
+          values = listOf("Clear", "Fragment", "None"),
+          description = "Clear if full words audible, Fragment if chopped/partial vocals audible, None if instrumental."
+        ),
+        "tacticalAdvice" to Schema.string(
+          description = "Actionable Suno v6 producer strategy tailored to this beat's BPM, key, low-end share, and mode."
+        ),
+        "recommendedStylePrompt" to Schema.string(
+          description = "Primary Suno v6 Style of Music prompt strictly <= 200 characters, no artist/producer names."
+        ),
+        "suggestedSettings" to Schema.string(
+          description = "Recommended Suno v6 route, Variety, Weirdness, Style Influence, and Audio Influence settings."
+        ),
+        "suggestions" to Schema.array(
+          items = Schema.obj(
+            properties = mapOf(
+              "title" to Schema.string(description = "Short punchy variation label"),
+              "prompt" to Schema.string(description = "Distinct Suno v6 style prompt <= 200 chars, no artist names"),
+              "focusNote" to Schema.string(description = "Brief sonic objective for this variation")
+            )
+          ),
+          description = "Exactly 4 distinct Suno v6 style prompt variations."
+        ),
+        "searchGrounding" to Schema.string(
+          description = "Concise Suno v6 engineering summary note."
+        )
+      ),
+      optionalProperties = listOf("searchGrounding")
+    )
+  }
 
-    try {
-      val base64Audio = android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP)
-      val jsonBody = JSONObject().apply {
-        put("contents", JSONArray().apply {
-          put(JSONObject().apply {
-            put("parts", JSONArray().apply {
-              put(JSONObject().apply {
-                put("inlineData", JSONObject().apply {
-                  put("mimeType", mimeType)
-                  put("data", base64Audio)
-                })
-              })
-              put(JSONObject().apply {
-                put("text", "Transcribe the vocal phrases or chopped vocal fragments in this audio accurately. Honesty Law: If inaudible or purely instrumental, state 'No intelligible vocal phrases detected'. Never invent or guess words. Label as Clear or Fragment.")
-              })
-            })
-          })
-        })
+  private val structuredModel by lazy {
+    Firebase.ai.generativeModel(
+      modelName = MODEL_NAME,
+      generationConfig = generationConfig {
+        temperature = 0.4f
+        responseMimeType = "application/json"
+        responseSchema = consultationSchema
       }
-
-      val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent?key=$apiKey"
-      val request = Request.Builder()
-        .url(url)
-        .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-        .build()
-
-      val response = client.newCall(request).execute()
-      val respBody = response.body?.string() ?: ""
-      if (response.isSuccessful) {
-        val root = JSONObject(respBody)
-        val text = root.getJSONArray("candidates")
-          .getJSONObject(0)
-          .getJSONObject("content")
-          .getJSONArray("parts")
-          .getJSONObject(0)
-          .getString("text")
-        val confidence = if (text.contains("fragment", ignoreCase = true)) "Fragment" else if (text.contains("No intelligible", ignoreCase = true)) "None" else "Clear"
-        Pair(text.trim(), confidence)
-      } else {
-        Pair("Instrumental stem detected (clean sample audio)", "None")
-      }
-    } catch (e: Exception) {
-      Pair("Instrumental stem detected (no vocal phrases found)", "None")
-    }
+    )
   }
 
   /**
-   * Multimodal beat analysis and prompt generation using gemini-3.8-flash with Google Search grounding.
+   * Executes real multimodal beat consultation + vocal transcription via Firebase AI Logic.
+   * Surfaces timeouts and backend errors cleanly to the caller rather than hiding behind mock templates.
    */
   suspend fun consultBeatAnalyst(
     analysis: AudioAnalysisResult,
     jobType: String,
-    apiKey: String? = null
+    audioBytes: ByteArray? = null,
+    audioMimeType: String = "audio/wav"
   ): AiBeatConsultation = withContext(Dispatchers.IO) {
-    if (apiKey.isNullOrBlank()) {
-      return@withContext ruleBasedConsultation(analysis, jobType)
-    }
+    val promptInstruction = buildConsultationPrompt(analysis, jobType)
+    val attachedAudio = audioBytes?.takeIf { it.isNotEmpty() && it.size <= MAX_INLINE_AUDIO_BYTES }
 
-    try {
-      val systemPrompt = """
-        You are BooDa Beat AI, elite Suno v6 music producer and prompt engineer.
-        Your goal: Help producers who upload chopped sample-based hip-hop beats preserve the original sample/vocals 100% as the main melody, while beefing up the beat with hard-hitting 808s and modern trap drums, letting the beat breathe without overdriven instruments or long solos.
-        CRITICAL RULES:
-        1. All style prompts MUST be under 200 characters max.
-        2. NO producer or artist names permitted in prompts.
-        3. Keep sample and sampled vocals as the central melody backbone.
-        4. Focus on: deep resonant 808s, crisp rolling trap hi-hats, letting the beat breathe.
-        Return JSON with keys:
-        - "vocalText": Transcribed vocal text or "Instrumental detected"
-        - "vocalConfidence": "Clear" | "Fragment" | "None"
-        - "tacticalAdvice": Producer guidance for Suno v6
-        - "recommendedStylePrompt": Best style prompt (under 200 chars)
-        - "suggestedSettings": Suno v6 settings recommendations
-        - "suggestions": Array of 4 objects { "title", "prompt", "focusNote" } (each prompt <= 200 chars)
-        - "searchGrounding": Brief note on current Suno v6 best practices
-      """.trimIndent()
-
-      val userPrompt = """
-        Analyze this beat:
-        Title: ${analysis.fileName}
-        BPM: ${analysis.bpm?.toInt() ?: 130} (${analysis.bpmConfidence})
-        Key: ${analysis.keyName ?: "Unread"}
-        Low-end ratio: ${(analysis.lowShare * 100).toInt()}%
-        Centroid: ${analysis.centroidHz.toInt()} Hz
-        Job: $jobType
-        Generate 4 distinct Suno v6 style prompts strictly under 200 characters each.
-      """.trimIndent()
-
-      val jsonBody = JSONObject().apply {
-        put("contents", JSONArray().apply {
-          put(JSONObject().apply {
-            put("parts", JSONArray().apply {
-              put(JSONObject().put("text", "$systemPrompt\n\n$userPrompt"))
-            })
-          })
-        })
-        put("tools", JSONArray().apply {
-          put(JSONObject().apply {
-            put("googleSearch", JSONObject())
-          })
-        })
-        put("generationConfig", JSONObject().apply {
-          put("responseMimeType", "application/json")
-        })
-      }
-
-      val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$apiKey"
-      val request = Request.Builder()
-        .url(url)
-        .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-        .build()
-
-      val response = client.newCall(request).execute()
-      val respBody = response.body?.string() ?: ""
-      if (response.isSuccessful) {
-        val root = JSONObject(respBody)
-        val text = root.getJSONArray("candidates")
-          .getJSONObject(0)
-          .getJSONObject("content")
-          .getJSONArray("parts")
-          .getJSONObject(0)
-          .getString("text")
-
-        val resultJson = JSONObject(text)
-        val suggestionsArr = resultJson.optJSONArray("suggestions")
-        val suggestionsList = mutableListOf<SunoPromptSuggestion>()
-        if (suggestionsArr != null) {
-          for (i in 0 until suggestionsArr.length()) {
-            val item = suggestionsArr.getJSONObject(i)
-            val pText = item.optString("prompt", "").take(200)
-            suggestionsList.add(
-              SunoPromptSuggestion(
-                title = item.optString("title", "Prompt #${i + 1}"),
-                prompt = pText,
-                chars = pText.length,
-                focusNote = item.optString("focusNote", "Sample-locked 808 beef-up")
-              )
-            )
+    val response = try {
+      withTimeout(AI_TIMEOUT_MS) {
+        structuredModel.generateContent(
+          content {
+            if (attachedAudio != null) {
+              inlineData(attachedAudio, audioMimeType)
+            }
+            text(promptInstruction)
           }
-        }
-
-        if (suggestionsList.isEmpty()) {
-          suggestionsList.addAll(fallbackSuggestions(analysis, jobType))
-        }
-
-        AiBeatConsultation(
-          heardVocalText = resultJson.optString("vocalText", "Instrumental stem detected"),
-          vocalConfidence = resultJson.optString("vocalConfidence", "None"),
-          tacticalAdvice = resultJson.optString("tacticalAdvice", "Keep the original sample centered. Add rolling hats and soft-clipped 808 on beat 3."),
-          recommendedStylePrompt = resultJson.optString("recommendedStylePrompt", analysis.promptPreserve).take(200),
-          suggestedSettings = resultJson.optString("suggestedSettings", "Model v6 · Variety 0 · Weirdness 25 · Style Influence 70 · Audio Influence 80"),
-          suggestions = suggestionsList,
-          searchGroundingSummary = resultJson.optString("searchGrounding", "Suno v6 Pro: Route Extend, Variety 0 locks original audio")
         )
-      } else {
-        ruleBasedConsultation(analysis, jobType)
       }
+    } catch (e: TimeoutCancellationException) {
+      Log.e(TAG, "Gemini consultation timed out after ${AI_TIMEOUT_MS / 1000}s", e)
+      throw e
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
-      e.printStackTrace()
-      ruleBasedConsultation(analysis, jobType)
+      Log.e(TAG, "Firebase AI Logic request failed", e)
+      throw e
     }
+
+    val rawJson = response.text?.takeIf { it.isNotBlank() }
+      ?: throw IllegalStateException("Gemini returned an empty response.")
+
+    parseConsultationJson(rawJson, analysis, jobType)
   }
 
-  private fun ruleBasedConsultation(analysis: AudioAnalysisResult, jobType: String): AiBeatConsultation {
-    val bpmInt = analysis.bpm?.toInt() ?: 130
-    val lane = analysis.suggestedLane
-    val isPreserve = jobType.equals("preserve", ignoreCase = true)
-
-    val advice = if (isPreserve) {
-      "Preserve Law: Lock upload in place. Use punchy 808 sub and crisp rolling trap hi-hats. Set Variety to 0, Audio Influence to 80 to prevent melodic drift."
+  internal fun buildConsultationPrompt(analysis: AudioAnalysisResult, jobType: String): String {
+    val isPreserve = jobType.equals(JobType.PRESERVE.value, ignoreCase = true)
+    val modeDirective = if (isPreserve) {
+      "Route is Extend (Preserve uploaded sample). Begin recommended prompts with '$LOCK_LINE.' where appropriate, and keep drums/808s underneath the sample."
     } else {
-      "Full original production: Drive $lane pocket at $bpmInt BPM. Keep chopped sample melody as the lead backbone with hard 808s and fast hi-hat triplets."
+      "Route is Create (Original track inspired by tempo/pocket). Generate cohesive full-beat Suno v6 style prompts."
     }
 
-    val style = if (isPreserve) {
-      "Preserve original sample and vocals exactly as performed. Add hard-hitting 808s and modern trap drums underneath only. Spice only, sample stays lead.".take(200)
-    } else {
-      "$lane instrumental, $bpmInt BPM. Chopped soul loop is main melody. Hard 808 sub, punchy kick, crisp trap hi-hat rolls. Let the beat breathe.".take(200)
+    return """
+      You are an elite Suno v6 hip-hop / sample-beat producer and audio engineer.
+      Inspect the DSP telemetry below (and attached audio clip if provided) and return a structured JSON analysis.
+
+      STRICT PRODUCTION LAWS:
+      1. Honesty Law for vocalText: Only transcribe words you genuinely hear in the audio. Never invent, hallucinate, or guess lyric completions. If instrumental or unintelligible, return "No intelligible vocal phrases detected" and vocalConfidence = "None". Keep vocalText <= 120 characters.
+      2. Every style prompt ("recommendedStylePrompt" and each suggestion "prompt") MUST be strictly <= 200 characters.
+      3. NEVER include any real artist, rapper, singer, or producer names.
+      4. NEVER put negative exclusion commands ("no vocals", "no drums", "without") inside Style prompts.
+      5. $modeDirective
+
+      DSP TELEMETRY:
+      - Clip Name: ${analysis.fileName}
+      - Duration: ${"%.1f".format(analysis.durationSec)}s
+      - Tempo: ${analysis.bpm?.let { "%.1f".format(it) } ?: "Unknown"} BPM (confidence: ${analysis.bpmConfidence})
+      - Musical Key: ${analysis.keyName ?: "Unread"} (clear: ${analysis.keyClear})
+      - RMS Loudness: ${"%.1f".format(analysis.rmsDb)} dBFS | Peak: ${"%.1f".format(analysis.peakDb)} dBFS
+      - Sub-Bass Share (<160 Hz): ${(analysis.lowShare * 100).toInt()}%
+      - Spectral Centroid: ${analysis.centroidHz.toInt()} Hz
+      - Onset Density: ${analysis.onsetRate} hits/sec
+      - Suggested Lane: ${analysis.suggestedLane}
+
+      Provide 4 distinct Suno v6 prompt variations focusing on heavy tuned 808s, crisp trap/boom-bap pocket drums, and mix breathing room.
+    """.trimIndent()
+  }
+
+  internal fun parseConsultationJson(
+    jsonString: String,
+    analysis: AudioAnalysisResult,
+    jobType: String
+  ): AiBeatConsultation {
+    val root = JSONObject(jsonString)
+    val isPreserve = jobType.equals(JobType.PRESERVE.value, ignoreCase = true)
+
+    val rawVocalText = root.optString("vocalText", "No intelligible vocal phrases detected")
+      .trim()
+      .take(120)
+      .ifBlank { "No intelligible vocal phrases detected" }
+
+    val rawConfidence = root.optString("vocalConfidence", "None").trim()
+    val vocalConfidence = when {
+      rawConfidence.equals("Clear", ignoreCase = true) -> "Clear"
+      rawConfidence.equals("Fragment", ignoreCase = true) -> "Fragment"
+      else -> "None"
     }
 
-    val settings = if (isPreserve) {
-      "Model v6 · Route: Extend · Variety 0 · Weirdness 25 · Style Influence 70 · Audio Influence 80"
-    } else {
-      "Model v6 · Route: Create · Variety 0 · Weirdness 20 · Style Influence 65 · Audio Influence 0"
+    val tacticalAdvice = root.optString("tacticalAdvice", "")
+      .trim()
+      .ifBlank {
+        if (isPreserve) {
+          "Lock uploaded sample on Extend route (Variety 0, Audio Influence 80) and layer pocketed 808 + hi-hats underneath."
+        } else {
+          "Build around ${analysis.suggestedLane} pocket at ${analysis.bpm?.toInt() ?: 130} BPM with controlled low-end punch."
+        }
+      }
+
+    val recommendedStyle = sanitizePrompt200(
+      root.optString("recommendedStylePrompt", "")
+        .ifBlank { if (isPreserve) analysis.promptPreserve else analysis.promptOriginal }
+    )
+
+    val suggestedSettings = root.optString("suggestedSettings", "")
+      .trim()
+      .ifBlank {
+        if (isPreserve) {
+          "Model v6 · Route: Extend · Variety 0 · Weirdness 25 · Style Influence 70 · Audio Influence 80"
+        } else {
+          "Model v6 · Route: Create · Variety 0 · Weirdness 20 · Style Influence 65 · Audio Influence 0"
+        }
+      }
+
+    val suggestionsArr = root.optJSONArray("suggestions")
+    val suggestionsList = mutableListOf<SunoPromptSuggestion>()
+    if (suggestionsArr != null) {
+      for (i in 0 until suggestionsArr.length()) {
+        val item = suggestionsArr.optJSONObject(i) ?: continue
+        val cleanPrompt = sanitizePrompt200(item.optString("prompt", ""))
+        if (cleanPrompt.isNotBlank()) {
+          suggestionsList.add(
+            SunoPromptSuggestion(
+              title = item.optString("title", "Variation #${i + 1}").trim().ifBlank { "Variation #${i + 1}" },
+              prompt = cleanPrompt,
+              chars = cleanPrompt.length,
+              focusNote = item.optString("focusNote", "Sample-locked 808 pocket").trim()
+            )
+          )
+        }
+      }
     }
+
+    val grounding = root.optString("searchGrounding", "").trim().takeIf { it.isNotEmpty() }
 
     return AiBeatConsultation(
-      heardVocalText = "Instrumental detected (no vocal stems or speech phrases found)",
-      vocalConfidence = "None",
-      tacticalAdvice = advice,
-      recommendedStylePrompt = style,
-      suggestedSettings = settings,
-      suggestions = fallbackSuggestions(analysis, jobType),
-      searchGroundingSummary = "Suno v6: Route Extend with Audio Influence 75-85 locks original uploaded audio."
+      heardVocalText = rawVocalText,
+      vocalConfidence = vocalConfidence,
+      tacticalAdvice = tacticalAdvice,
+      recommendedStylePrompt = recommendedStyle,
+      suggestedSettings = suggestedSettings,
+      suggestions = suggestionsList,
+      searchGroundingSummary = grounding
     )
   }
 
-  private fun fallbackSuggestions(analysis: AudioAnalysisResult, jobType: String): List<SunoPromptSuggestion> {
-    val bpm = analysis.bpm?.toInt() ?: 130
-    val lane = analysis.suggestedLane
-    val p1 = "Preserve original sample and vocal chops. Add punchy kick, hard-hitting tuned 808 sub, and crisp rolling trap hi-hats. Let the beat breathe. $bpm BPM.".take(200)
-    val p2 = "Maintain uploaded chopped sample as core backbone. Deep sub-bass thumps, crisp rimshot, and subtle trap percussion. Spacious and soulful. Let it breathe.".take(200)
-    val p3 = "Keep original chopped loop and vocals leading. Beef up with deep 808 bass punch and fast hi-hat triplets over $lane pocket. Dynamic, punchy bounce.".take(200)
-    val p4 = "Preserve uploaded chopped audio exactly as performed. Layer heavy 808 sub underneath swinging drums. Snapping snare on 2 and 4, tight trap hats. $bpm BPM.".take(200)
-
-    return listOf(
-      SunoPromptSuggestion(
-        title = "Hard 808 Beef-Up",
-        prompt = p1,
-        chars = p1.length,
-        focusNote = "Locks sample melody, punches up low end"
-      ),
-      SunoPromptSuggestion(
-        title = "Spacious & Breathe",
-        prompt = p2,
-        chars = p2.length,
-        focusNote = "Minimal instrumentation, open mix"
-      ),
-      SunoPromptSuggestion(
-        title = "Modern Trap Rolls",
-        prompt = p3,
-        chars = p3.length,
-        focusNote = "Intricate hi-hats, driving groove"
-      ),
-      SunoPromptSuggestion(
-        title = "Soulful MPC Swing",
-        prompt = p4,
-        chars = p4.length,
-        focusNote = "Humanized swing with modern sub weight"
-      )
-    )
+  private fun sanitizePrompt200(raw: String): String {
+    val normalized = raw.replace(Regex("\\s+"), " ").trim()
+    if (normalized.length <= 200) return normalized
+    val cut = normalized.substring(0, 200)
+    val lastSpace = cut.lastIndexOf(' ')
+    return if (lastSpace > 140) cut.substring(0, lastSpace).trimEnd(',', '.', ';') else cut.trim()
   }
 }

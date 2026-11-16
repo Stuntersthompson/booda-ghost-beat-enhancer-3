@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai.AiBeatConsultation
+import com.example.ai.AiConsultationUiState
 import com.example.ai.GeminiBeatService
 import com.example.audio.AudioAnalysisResult
 import com.example.audio.AudioAnalyzer
@@ -19,12 +20,16 @@ import com.example.data.db.AppDatabase
 import com.example.data.model.*
 import com.example.data.repository.FavoriteRepository
 import com.example.data.repository.PromptBankRepository
+import com.example.data.repository.PromptHistoryRepository
 import com.example.data.repository.StudioPreferencesRepository
 import com.example.data.repository.TakeRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -46,6 +51,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val database = AppDatabase.getDatabase(application)
   val takeRepo = TakeRepository(database.takeDao())
   val favoriteRepo = FavoriteRepository(database.favoritePromptDao())
+  val historyRepo = PromptHistoryRepository(database.promptHistoryDao())
   val preferencesRepo = StudioPreferencesRepository(application)
   private val audioAnalyzer = AudioAnalyzer(application)
   private val audioRecorder = AudioRecorder()
@@ -97,8 +103,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val _curatedCategory = MutableStateFlow("All")
   val curatedCategory: StateFlow<String> = _curatedCategory.asStateFlow()
 
-  private val _recentPrompts = MutableStateFlow<List<String>>(emptyList())
-  val recentPrompts: StateFlow<List<String>> = _recentPrompts.asStateFlow()
+  // Room-backed Last 20 Generated Prompts History
+  val recentPromptHistory: StateFlow<List<PromptHistoryEntity>> = historyRepo.recentPrompts
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+  val recentPrompts: StateFlow<List<String>> = historyRepo.recentPrompts
+    .map { entries -> entries.map { it.prompt } }
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
   // Navigation
   private val _currentTab = MutableStateFlow(StudioTab.BUILD)
@@ -160,6 +171,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   private val _aiConsultation = MutableStateFlow<AiBeatConsultation?>(null)
   val aiConsultation: StateFlow<AiBeatConsultation?> = _aiConsultation.asStateFlow()
+
+  private val _aiConsultationState = MutableStateFlow<AiConsultationUiState>(AiConsultationUiState.Idle)
+  val aiConsultationState: StateFlow<AiConsultationUiState> = _aiConsultationState.asStateFlow()
+
+  private var lastAnalyzedWavBytes: ByteArray? = null
+
+  private val _complianceUndoSnapshot = MutableStateFlow<ComplianceSnapshot?>(null)
+  val complianceUndoSnapshot: StateFlow<ComplianceSnapshot?> = _complianceUndoSnapshot.asStateFlow()
 
   // Library & Search Filters
   private val _libraryQuery = MutableStateFlow("")
@@ -289,6 +308,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       .replace("[GENRE]", _activeLane.value)
     _stylePrompt.value = replaced
     if (_jobType.value == JobType.PRESERVE) ensureLockLineInStyle()
+    recordGeneratedPrompt(_stylePrompt.value, source = "Slot Inject")
   }
 
   fun randomizeAll() {
@@ -313,6 +333,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       _excludeText.value = bankRepo.excludeBanks.random().text
     }
     updateSimplePrompt()
+    recordGeneratedPrompt(_stylePrompt.value, source = "Randomize", lane = lane)
   }
 
   private fun ensureLockLineInStyle() {
@@ -382,10 +403,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
           _isAnalyzing.value = true
           val result = audioAnalyzer.analyzeRecordedSamples("Live Mic Recording", samples)
           _audioAnalysis.value = result
+          val wavBytes = audioAnalyzer.encodeWav16KhzMono(samples, 44100, maxSeconds = 15)
+          lastAnalyzedWavBytes = wavBytes
           _isAnalyzing.value = false
-          // Consult AI
-          val consultation = geminiService.consultBeatAnalyst(result, _jobType.value.value)
-          _aiConsultation.value = consultation
+          val analyzedPrompt = if (_jobType.value == JobType.PRESERVE) result.promptPreserve else result.promptOriginal
+          recordGeneratedPrompt(
+            prompt = analyzedPrompt,
+            source = "Analyze",
+            lane = result.suggestedLane,
+            bpm = result.bpm?.toInt()
+          )
+          runAiBeatConsultation(result, wavBytes)
         }
       }
     }
@@ -400,13 +428,168 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     viewModelScope.launch {
       audioPlayer.stop()
       _isAnalyzing.value = true
-      val result = audioAnalyzer.analyzeAudioUri(uri, fileName)
+      val analyzedClip = audioAnalyzer.analyzeAudioUriWithClip(uri, fileName)
+      val result = analyzedClip.result
       _audioAnalysis.value = result
+      lastAnalyzedWavBytes = analyzedClip.multimodalWavBytes
       val fallbackMs = (result.durationSec * 1000.0).toLong().coerceAtLeast(1000L)
       audioPlayer.loadUri(getApplication(), uri, fallbackMs)
       _isAnalyzing.value = false
-      val consultation = geminiService.consultBeatAnalyst(result, _jobType.value.value)
+      val analyzedPrompt = if (_jobType.value == JobType.PRESERVE) result.promptPreserve else result.promptOriginal
+      recordGeneratedPrompt(
+        prompt = analyzedPrompt,
+        source = "Analyze",
+        lane = result.suggestedLane,
+        bpm = result.bpm?.toInt()
+      )
+      runAiBeatConsultation(result, analyzedClip.multimodalWavBytes)
+    }
+  }
+
+  fun retryAiConsultation() {
+    val result = _audioAnalysis.value ?: return
+    viewModelScope.launch {
+      runAiBeatConsultation(result, lastAnalyzedWavBytes)
+    }
+  }
+
+  private suspend fun runAiBeatConsultation(result: AudioAnalysisResult, wavBytes: ByteArray?) {
+    _aiConsultationState.value = AiConsultationUiState.Loading(
+      if (wavBytes != null && wavBytes.isNotEmpty()) {
+        "Listening to audio & consulting Gemini 3.8 Flash..."
+      } else {
+        "Analyzing DSP metrics with Gemini 3.8 Flash..."
+      }
+    )
+    try {
+      val consultation = geminiService.consultBeatAnalyst(
+        analysis = result,
+        jobType = _jobType.value.value,
+        audioBytes = wavBytes
+      )
       _aiConsultation.value = consultation
+      _aiConsultationState.value = AiConsultationUiState.Success(consultation)
+
+      if ((consultation.vocalConfidence == "Clear" || consultation.vocalConfidence == "Fragment") &&
+        _audioAnalysis.value?.sampleWordsText == null
+      ) {
+        val current = _audioAnalysis.value
+        if (current != null && !consultation.heardVocalText.contains("No intelligible", ignoreCase = true)) {
+          _audioAnalysis.value = current.copy(
+            sampleWordsText = consultation.heardVocalText.take(120),
+            sampleWordsKind = if (consultation.vocalConfidence == "Clear") "Heard clearly" else "Fragment only"
+          )
+        }
+      }
+
+      val analyzedPrompt = if (_jobType.value == JobType.PRESERVE) result.promptPreserve else result.promptOriginal
+      consultation.suggestions.firstOrNull()?.let { firstSug ->
+        if (firstSug.prompt != analyzedPrompt) {
+          recordGeneratedPrompt(
+            prompt = firstSug.prompt,
+            source = "Analyze",
+            lane = result.suggestedLane,
+            bpm = result.bpm?.toInt()
+          )
+        }
+      }
+    } catch (e: TimeoutCancellationException) {
+      _aiConsultationState.value = AiConsultationUiState.Error(
+        message = "Gemini consultation timed out after 60 seconds. Please retry.",
+        canRetry = true
+      )
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      _aiConsultationState.value = AiConsultationUiState.Error(
+        message = e.localizedMessage ?: "Firebase AI Logic request failed. Verify network/App Check and retry.",
+        canRetry = true
+      )
+    }
+  }
+
+  fun currentComplianceSnapshot(): ComplianceSnapshot {
+    return ComplianceSnapshot(
+      jobType = _jobType.value,
+      stylePrompt = _stylePrompt.value,
+      lyricsMap = _lyricsMap.value,
+      excludeText = _excludeText.value,
+      variety = _variety.value,
+      weirdness = _weirdness.value,
+      styleInfluence = _styleInfluence.value,
+      audioInfluence = _audioInfluence.value
+    )
+  }
+
+  fun autoFixComplianceRule(ruleId: ComplianceRuleId, context: Context? = null) {
+    val before = currentComplianceSnapshot()
+    val fixed = SunoComplianceAuditor.autoFixRule(ruleId, before, _activeLane.value)
+    if (fixed == before) return
+    _complianceUndoSnapshot.value = before.copy(fixSummary = fixed.fixSummary)
+    applyComplianceSnapshot(fixed)
+    if (context != null && fixed.fixSummary.isNotBlank()) {
+      Toast.makeText(context, fixed.fixSummary, Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun autoFixAllCompliance(context: Context? = null) {
+    val before = currentComplianceSnapshot()
+    val fixed = SunoComplianceAuditor.autoFixAll(before, _activeLane.value)
+    if (fixed == before) return
+    _complianceUndoSnapshot.value = before.copy(fixSummary = fixed.fixSummary)
+    applyComplianceSnapshot(fixed)
+    if (context != null && fixed.fixSummary.isNotBlank()) {
+      Toast.makeText(context, fixed.fixSummary, Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun undoLastComplianceFix(context: Context? = null) {
+    val prev = _complianceUndoSnapshot.value ?: return
+    applyComplianceSnapshot(prev)
+    _complianceUndoSnapshot.value = null
+    if (context != null) {
+      Toast.makeText(context, "Reverted compliance auto-fix", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun dismissComplianceUndo() {
+    _complianceUndoSnapshot.value = null
+  }
+
+  private fun applyComplianceSnapshot(snapshot: ComplianceSnapshot) {
+    _jobType.value = snapshot.jobType
+    _stylePrompt.value = snapshot.stylePrompt
+    _lyricsMap.value = snapshot.lyricsMap
+    _excludeText.value = snapshot.excludeText
+    _variety.value = snapshot.variety
+    _weirdness.value = snapshot.weirdness
+    _styleInfluence.value = snapshot.styleInfluence
+    _audioInfluence.value = snapshot.audioInfluence
+    updateSimplePrompt()
+    resetHandoffSteps()
+  }
+
+  fun loadTakeIntoBuild(take: TakeEntity, context: Context? = null) {
+    val resolvedJobType = JobType.fromString(take.jobType)
+    _jobType.value = resolvedJobType
+    if (take.lane.isNotBlank() && bankRepo.allLanes.contains(take.lane)) {
+      _activeLane.value = take.lane
+    }
+    _stylePrompt.value = take.style
+    _excludeText.value = take.excludeText
+    _lyricsMap.value = take.lyrics.ifBlank { bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJobType) }
+    if (resolvedJobType == JobType.PRESERVE) {
+      _variety.value = 0
+      _audioInfluence.value = 80
+    } else {
+      _variety.value = 0
+      _audioInfluence.value = 0
+    }
+    updateSimplePrompt()
+    resetHandoffSteps()
+    _currentTab.value = StudioTab.BUILD
+    if (context != null) {
+      Toast.makeText(context, "Loaded take '${take.name}' into Build", Toast.LENGTH_SHORT).show()
     }
   }
 
@@ -467,6 +650,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value)
     updateSimplePrompt()
     resetHandoffSteps()
+    recordGeneratedPrompt(
+      prompt = _stylePrompt.value,
+      source = "Preset",
+      lane = lane,
+      bpm = bpmValue?.toInt()
+    )
   }
 
   fun adjustBpmMultiplier(multiplier: Double) {
@@ -498,6 +687,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     } else {
       _stylePrompt.value = a.promptOriginal
     }
+    recordGeneratedPrompt(
+      prompt = _stylePrompt.value,
+      source = "Send-to-Build",
+      lane = a.suggestedLane,
+      bpm = a.bpm?.toInt()
+    )
     _currentTab.value = StudioTab.BUILD
   }
 
@@ -683,14 +878,69 @@ ${_lyricsMap.value}
     }
   }
 
-  fun addRecentPrompt(prompt: String) {
-    val current = _recentPrompts.value.toMutableList()
-    current.remove(prompt)
-    current.add(0, prompt)
-    if (current.size > 15) {
-      current.removeAt(current.size - 1)
+  fun recordGeneratedPrompt(
+    prompt: String,
+    source: String,
+    lane: String = _activeLane.value,
+    jobType: JobType = _jobType.value,
+    bpm: Int? = _audioAnalysis.value?.bpm?.toInt()
+  ) {
+    if (prompt.isBlank()) return
+    viewModelScope.launch {
+      historyRepo.recordPrompt(
+        prompt = prompt,
+        source = source,
+        lane = lane,
+        jobType = jobType,
+        bpm = bpm
+      )
     }
-    _recentPrompts.value = current
+  }
+
+  fun addRecentPrompt(
+    prompt: String,
+    source: String = "Builder",
+    lane: String = _activeLane.value
+  ) {
+    recordGeneratedPrompt(prompt = prompt, source = source, lane = lane)
+  }
+
+  fun recallPromptVariation(
+    entry: PromptHistoryEntity,
+    navigateToBuild: Boolean = false,
+    context: Context? = null
+  ) {
+    val resolvedJobType = JobType.fromString(entry.jobType)
+    _jobType.value = resolvedJobType
+    if (entry.lane.isNotBlank() && bankRepo.allLanes.contains(entry.lane)) {
+      _activeLane.value = entry.lane
+    }
+    _stylePrompt.value = entry.prompt
+    _lyricsMap.value = bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJobType)
+    updateSimplePrompt()
+    resetHandoffSteps()
+    if (navigateToBuild) {
+      _currentTab.value = StudioTab.BUILD
+    }
+    if (context != null) {
+      Toast.makeText(
+        context,
+        "Loaded ${entry.source} variation (${entry.lane}) into Build",
+        Toast.LENGTH_SHORT
+      ).show()
+    }
+  }
+
+  fun deletePromptHistoryEntry(id: Long) {
+    viewModelScope.launch {
+      historyRepo.deleteEntry(id)
+    }
+  }
+
+  fun clearPromptHistory() {
+    viewModelScope.launch {
+      historyRepo.clearHistory()
+    }
   }
 
   // Suno Handoff Checklist Tracking (Steps 1..5)
@@ -745,6 +995,13 @@ ${_lyricsMap.value}
     _audioInfluence.value = 80
     updateSimplePrompt()
     resetHandoffSteps()
+    recordGeneratedPrompt(
+      prompt = a.promptPreserve,
+      source = "Send-to-Build",
+      lane = a.suggestedLane,
+      jobType = JobType.PRESERVE,
+      bpm = a.bpm?.toInt()
+    )
     _currentTab.value = StudioTab.BUILD
   }
 
