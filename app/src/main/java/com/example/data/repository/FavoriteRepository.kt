@@ -3,6 +3,7 @@ package com.example.data.repository
 import com.example.data.db.FavoritePromptDao
 import com.example.data.model.CuratedSunoPrompt
 import com.example.data.model.FavoritePromptEntity
+import com.example.data.model.STYLE_LIMIT
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -86,39 +87,53 @@ class FavoriteRepository(private val favoriteDao: FavoritePromptDao) {
   }
 
   suspend fun importFavoritesJson(jsonStr: String): Int {
+    return importFavoritesDetailed(jsonStr).importedCount
+  }
+
+  suspend fun importFavoritesDetailed(jsonStr: String): ImportBatchResult {
+    val trimmed = jsonStr.trim()
+    if (trimmed.isEmpty()) {
+      return ImportBatchResult(0, 0, "Empty JSON input.")
+    }
     var count = 0
-    try {
-      val trimmed = jsonStr.trim()
-      val jsonArray: JSONArray = if (trimmed.startsWith("{")) {
-        val envelope = JSONObject(trimmed)
-        envelope.optJSONArray("favorites") ?: JSONArray()
-      } else if (trimmed.startsWith("[")) {
-        JSONArray(trimmed)
-      } else {
-        return 0
+    var skipped = 0
+    return try {
+      val jsonArray: JSONArray = when {
+        trimmed.startsWith("{") -> {
+          val envelope = JSONObject(trimmed)
+          envelope.optJSONArray("favorites") ?: JSONArray()
+        }
+        trimmed.startsWith("[") -> JSONArray(trimmed)
+        else -> return ImportBatchResult(0, 0, "Invalid JSON format.")
       }
 
-      for (i in 0 until jsonArray.length()) {
-        val item = jsonArray.get(i)
+      val limit = minOf(jsonArray.length(), 250)
+      for (i in 0 until limit) {
+        val item = jsonArray.opt(i)
         if (item is JSONObject) {
           val promptText = item.optString("prompt", "").ifEmpty { item.optString("text", "") }
+            .trim()
+            .take(STYLE_LIMIT)
           if (promptText.isNotBlank()) {
+            val rawSaved = item.optLong("savedAt", System.currentTimeMillis())
             val entity = FavoritePromptEntity(
               id = item.optLong("id", System.currentTimeMillis() + i),
               prompt = promptText,
-              category = item.optString("category", "Imported"),
-              subgenre = item.optString("subgenre", "Custom"),
-              bpmHint = item.optString("bpmHint", ""),
-              chars = item.optInt("chars", promptText.length),
-              savedAt = item.optLong("savedAt", System.currentTimeMillis())
+              category = item.optString("category", "Imported").trim().take(80).ifBlank { "Imported" },
+              subgenre = item.optString("subgenre", "Custom").trim().take(80).ifBlank { "Custom" },
+              bpmHint = item.optString("bpmHint", "").trim().take(40),
+              chars = promptText.length,
+              savedAt = if (rawSaved > 0L) rawSaved else System.currentTimeMillis()
             )
             favoriteDao.insertFavorite(entity)
             count++
+          } else {
+            skipped++
           }
         } else if (item is String && item.isNotBlank()) {
-          // Check if string matches a curated prompt ID or text
-          val curatedMatch = CuratedPrompts.ALL_CURATED.find { 
-            it.id.toString() == item || it.prompt.equals(item, ignoreCase = true) 
+          val clean = item.trim().take(STYLE_LIMIT)
+          val curatedMatch = CuratedPrompts.ALL_CURATED.find {
+            it.id.toString() == clean || it.prompt.equals(clean, ignoreCase = true)
           }
           if (curatedMatch != null) {
             insertFavorite(curatedMatch)
@@ -126,21 +141,28 @@ class FavoriteRepository(private val favoriteDao: FavoritePromptDao) {
           } else {
             val entity = FavoritePromptEntity(
               id = System.currentTimeMillis() + i,
-              prompt = item,
+              prompt = clean,
               category = "Imported",
               subgenre = "Custom",
               bpmHint = "",
-              chars = item.length,
+              chars = clean.length,
               savedAt = System.currentTimeMillis()
             )
             favoriteDao.insertFavorite(entity)
             count++
           }
+        } else {
+          skipped++
         }
       }
+      ImportBatchResult(
+        importedCount = count,
+        skippedCount = skipped,
+        errorMessage = if (count == 0) "No valid favorite prompts found." else null
+      )
     } catch (e: Exception) {
       e.printStackTrace()
+      ImportBatchResult(count, skipped, "Malformed JSON: ${e.localizedMessage ?: "parse failed"}")
     }
-    return count
   }
 }

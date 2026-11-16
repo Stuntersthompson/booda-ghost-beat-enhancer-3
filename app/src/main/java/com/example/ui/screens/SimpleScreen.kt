@@ -21,6 +21,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,194 +47,261 @@ fun SimpleScreen(viewModel: MainViewModel) {
   val isOverLimit = chars > SIMPLE_WORKING_LIMIT
   val remixTemplates = remember(activeLane) { viewModel.bankRepo.getRemixTemplates(activeLane) }
 
-  LazyColumn(
-    modifier = Modifier
-      .fillMaxSize()
-      .background(StudioBg)
-      .padding(horizontal = 14.dp),
-    contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
-    verticalArrangement = Arrangement.spacedBy(14.dp)
-  ) {
-    // Header
-    item {
-      Column {
-        Text(
-          text = "SIMPLE COMPOSER (SINGLE BOX)",
-          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-          color = AmberGold
-        )
-        Text(
-          text = "Unified all-in-one prompt combining lane texture, drum moves, and full-song arrangement directives. Working limit ~3,000 characters.",
-          style = MaterialTheme.typography.bodyMedium,
-          color = TextSecondary
-        )
-      }
+  val headerBlock: @Composable () -> Unit = {
+    Column {
+      Text(
+        text = "SIMPLE COMPOSER (SINGLE BOX)",
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        color = AmberGold
+      )
+      Text(
+        text = "Unified all-in-one prompt combining lane texture, drum moves, and full-song arrangement directives. Working limit ~3,000 characters.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = TextSecondary
+      )
     }
+  }
 
-    // Quick Actions
-    item {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+  val quickActionsBlock: @Composable () -> Unit = {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      Button(
+        onClick = { viewModel.updateSimplePrompt() },
+        colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+          .weight(1f)
+          .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+          .semantics { contentDescription = "Regenerate Simple composer prompt" }
+          .testTag("action_regen_simple")
       ) {
-        Button(
-          onClick = { viewModel.updateSimplePrompt() },
-          colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
-          shape = RoundedCornerShape(8.dp),
-          modifier = Modifier.weight(1f).testTag("action_regen_simple")
-        ) {
-          Icon(Icons.Default.Bolt, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("Regenerate", color = TextPrimary)
-        }
+        Icon(Icons.Default.Bolt, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Regenerate", color = TextPrimary)
+      }
 
-        Button(
-          onClick = { viewModel.randomizeAll() },
-          colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
-          shape = RoundedCornerShape(8.dp),
-          modifier = Modifier.weight(1f).testTag("action_random_simple")
-        ) {
-          Icon(Icons.Default.Shuffle, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("Randomize", color = TextPrimary)
-        }
+      Button(
+        onClick = { viewModel.randomizeAll() },
+        colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+          .weight(1f)
+          .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+          .semantics { contentDescription = "Randomize lane and Simple composer prompt" }
+          .testTag("action_random_simple")
+      ) {
+        Icon(Icons.Default.Shuffle, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Randomize", color = TextPrimary)
       }
     }
+  }
 
-    // Remix Family Templates Chips
-    item {
-      Column {
-        Text(
-          text = "REMIX FAMILIES FOR $activeLane",
-          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-          color = TextMuted
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        LazyRow(
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-          modifier = Modifier.fillMaxWidth()
-        ) {
-          items(remixTemplates, key = { it.id }) { rt ->
-            Surface(
-              color = StudioCardElevated,
-              shape = RoundedCornerShape(14.dp),
-              modifier = Modifier
-                .clip(RoundedCornerShape(14.dp))
-                .clickable {
-                  val newPrompt = if (isPreserve) {
-                    "${rt.prompt}\n\n[Instrumental]\n[Intro] (uploaded sample plays solo exactly as performed)\n[Verse 1] (canvas drums enter underneath)\n[Build-Up] (tension builds into chorus drop)\n[Chorus 1] (full canvas drop at peak weight)\n[Breakdown] (sample plays solo untouched)\n[Chorus 2] (final heaviest drop)\n[Outro] (canvas drums fade, sample finishes solo)\n[End]"
-                  } else {
-                    "${rt.prompt.replace("$LOCK_LINE. ", "")}\n\n[Instrumental]\n[Intro] (melodic atmosphere)\n[Verse 1] (full groove enters)\n[Build-Up] (build into chorus)\n[Chorus 1] (peak drop energy)\n[Breakdown] (melody solo)\n[Chorus 2] (heaviest finish)\n[Outro] (clean fade)\n[End]"
-                  }
-                  viewModel.updateSimplePrompt(newPrompt)
+  val remixFamiliesBlock: @Composable () -> Unit = {
+    Column {
+      Text(
+        text = "REMIX FAMILIES FOR $activeLane",
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+        color = TextMuted
+      )
+      Spacer(modifier = Modifier.height(6.dp))
+      LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        items(remixTemplates, key = { it.id }) { rt ->
+          Surface(
+            color = StudioCardElevated,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+              .clip(RoundedCornerShape(14.dp))
+              .semantics {
+                role = Role.Button
+                contentDescription = "Load ${rt.family} remix template for $activeLane"
+              }
+              .clickable {
+                val newPrompt = if (isPreserve) {
+                  "${rt.prompt}\n\n[Instrumental]\n[Intro] (uploaded sample plays solo exactly as performed)\n[Verse 1] (canvas drums enter underneath)\n[Build-Up] (tension builds into chorus drop)\n[Chorus 1] (full canvas drop at peak weight)\n[Breakdown] (sample plays solo untouched)\n[Chorus 2] (final heaviest drop)\n[Outro] (canvas drums fade, sample finishes solo)\n[End]"
+                } else {
+                  "${rt.prompt.replace("$LOCK_LINE. ", "")}\n\n[Instrumental]\n[Intro] (melodic atmosphere)\n[Verse 1] (full groove enters)\n[Build-Up] (build into chorus)\n[Chorus 1] (peak drop energy)\n[Breakdown] (melody solo)\n[Chorus 2] (heaviest finish)\n[Outro] (clean fade)\n[End]"
                 }
-                .border(0.5.dp, StudioBorder, RoundedCornerShape(14.dp))
+                viewModel.updateSimplePrompt(newPrompt)
+              }
+              .border(0.5.dp, StudioBorder, RoundedCornerShape(14.dp))
+          ) {
+            Box(
+              contentAlignment = Alignment.Center,
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
               Text(
                 text = rt.family,
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                color = StudioCyan,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                color = StudioCyan
               )
             }
           }
         }
       }
     }
+  }
 
-    // Simple Prompt Editor Box
-    item {
-      Surface(
-        color = StudioCard,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier
-          .fillMaxWidth()
-          .border(
-            1.dp,
-            if (isOverLimit) StudioMiss else StudioBorder,
-            RoundedCornerShape(12.dp)
-          )
-      ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Text(
-                text = "SIMPLE PROMPT BOX",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = AmberGold
-              )
-              Spacer(modifier = Modifier.width(8.dp))
-              Surface(
-                color = if (isOverLimit) Color(0x33EF4444) else StudioCardElevated,
-                shape = RoundedCornerShape(6.dp)
-              ) {
-                Text(
-                  text = "$chars / $SIMPLE_WORKING_LIMIT c",
-                  style = MonospaceMetric.copy(fontSize = 11.sp),
-                  color = if (isOverLimit) StudioMiss else StudioCyan,
-                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-              }
-            }
-
-            var simpleCopiedFlash by remember { mutableStateOf(false) }
-            LaunchedEffect(simpleCopiedFlash) {
-              if (simpleCopiedFlash) {
-                kotlinx.coroutines.delay(1200L)
-                simpleCopiedFlash = false
-              }
-            }
-            IconButton(
-              onClick = {
-                simpleCopiedFlash = true
-                viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt)
-              },
-              modifier = Modifier.minimumInteractiveComponentSize().testTag("action_copy_simple")
+  val promptEditorCard: @Composable () -> Unit = {
+    Surface(
+      color = StudioCard,
+      shape = RoundedCornerShape(12.dp),
+      modifier = Modifier
+        .fillMaxWidth()
+        .border(
+          1.dp,
+          if (isOverLimit) StudioMiss else StudioBorder,
+          RoundedCornerShape(12.dp)
+        )
+    ) {
+      Column(modifier = Modifier.padding(14.dp)) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+              text = "SIMPLE PROMPT BOX",
+              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+              color = AmberGold
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Surface(
+              color = if (isOverLimit) Color(0x33EF4444) else StudioCardElevated,
+              shape = RoundedCornerShape(6.dp)
             ) {
-              Icon(
-                imageVector = if (simpleCopiedFlash) Icons.Default.Check else Icons.Default.ContentCopy,
-                contentDescription = "Copy Prompt",
-                tint = if (simpleCopiedFlash) StudioWinner else TextSecondary,
-                modifier = Modifier.size(18.dp)
+              Text(
+                text = "$chars / $SIMPLE_WORKING_LIMIT c",
+                style = MonospaceMetric.copy(fontSize = 11.sp),
+                color = if (isOverLimit) StudioMiss else StudioCyan,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
               )
             }
           }
 
-          Spacer(modifier = Modifier.height(10.dp))
-
-          OutlinedTextField(
-            value = simplePrompt,
-            onValueChange = { viewModel.updateSimplePrompt(it) },
-            modifier = Modifier.fillMaxWidth().testTag("input_simple_prompt"),
-            textStyle = MonospacePrompt.copy(color = TextPrimary),
-            minLines = 10,
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedContainerColor = StudioBg,
-              unfocusedContainerColor = StudioBg,
-              focusedBorderColor = StudioCyan,
-              unfocusedBorderColor = StudioBorder
-            ),
-            shape = RoundedCornerShape(8.dp)
-          )
+          var simpleCopiedFlash by remember { mutableStateOf(false) }
+          LaunchedEffect(simpleCopiedFlash) {
+            if (simpleCopiedFlash) {
+              kotlinx.coroutines.delay(1200L)
+              simpleCopiedFlash = false
+            }
+          }
+          IconButton(
+            onClick = {
+              simpleCopiedFlash = true
+              viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt)
+            },
+            modifier = Modifier
+              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+              .testTag("action_copy_simple")
+          ) {
+            Icon(
+              imageVector = if (simpleCopiedFlash) Icons.Default.Check else Icons.Default.ContentCopy,
+              contentDescription = "Copy Simple Prompt",
+              tint = if (simpleCopiedFlash) StudioWinner else TextSecondary,
+              modifier = Modifier.size(18.dp)
+            )
+          }
         }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        OutlinedTextField(
+          value = simplePrompt,
+          onValueChange = { viewModel.updateSimplePrompt(it) },
+          modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "Editable Simple Composer single-box Suno prompt" }
+            .testTag("input_simple_prompt"),
+          textStyle = MonospacePrompt.copy(color = TextPrimary),
+          minLines = 10,
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = StudioBg,
+            unfocusedContainerColor = StudioBg,
+            focusedBorderColor = StudioCyan,
+            unfocusedBorderColor = StudioBorder
+          ),
+          shape = RoundedCornerShape(8.dp)
+        )
       }
     }
+  }
 
-    // Primary Copy Button
-    item {
-      Button(
-        onClick = { viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt) },
-        colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("action_copy_simple_main")
+  val primaryCopyButton: @Composable () -> Unit = {
+    Button(
+      onClick = { viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt) },
+      colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
+      shape = RoundedCornerShape(10.dp),
+      modifier = Modifier
+        .fillMaxWidth()
+        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+        .semantics { contentDescription = "Copy full Simple Prompt to clipboard" }
+        .testTag("action_copy_simple_main")
+    ) {
+      Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black)
+      Spacer(modifier = Modifier.width(8.dp))
+      Text("Copy Simple Prompt to Clipboard", style = MaterialTheme.typography.titleMedium, color = Color.Black)
+    }
+  }
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(StudioBg)
+  ) {
+    val isWideLayout = maxWidth >= 760.dp
+
+    if (isWideLayout) {
+      Row(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(horizontal = 16.dp)
+          .testTag("simple_wide_layout"),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
       ) {
-        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black)
-        Spacer(modifier = Modifier.width(8.dp))
-        Text("Copy Simple Prompt to Clipboard", style = MaterialTheme.typography.titleMedium, color = Color.Black)
+        LazyColumn(
+          modifier = Modifier
+            .weight(0.95f)
+            .fillMaxHeight(),
+          contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
+          verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+          item { headerBlock() }
+          item { quickActionsBlock() }
+          item { remixFamiliesBlock() }
+          item { primaryCopyButton() }
+        }
+
+        LazyColumn(
+          modifier = Modifier
+            .weight(1.05f)
+            .fillMaxHeight(),
+          contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
+          verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+          item { promptEditorCard() }
+        }
+      }
+    } else {
+      LazyColumn(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(horizontal = 14.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+      ) {
+        item { headerBlock() }
+        item { quickActionsBlock() }
+        item { remixFamiliesBlock() }
+        item { promptEditorCard() }
+        item { primaryCopyButton() }
       }
     }
   }

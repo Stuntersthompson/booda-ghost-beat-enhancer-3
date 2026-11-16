@@ -1,13 +1,17 @@
 package com.example.viewmodel
 
 import android.app.Application
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.example.ai.AiBeatConsultation
 import com.example.ai.AiConsultationUiState
@@ -15,8 +19,6 @@ import com.example.ai.GeminiBeatService
 import com.example.ai.SearchGroundingUiState
 import com.example.ai.TranscriptionTarget
 import com.example.ai.TranscriptionUiState
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import com.example.audio.AudioAnalysisResult
 import com.example.audio.AudioAnalyzer
 import com.example.audio.AudioRecorder
@@ -28,8 +30,13 @@ import com.example.data.repository.PromptBankRepository
 import com.example.data.repository.PromptHistoryRepository
 import com.example.data.repository.StudioPreferencesRepository
 import com.example.data.repository.TakeRepository
+import com.google.firebase.FirebaseApp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +44,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 enum class StudioTab(val title: String) {
@@ -50,7 +58,15 @@ enum class StudioTab(val title: String) {
   ADVISOR("Advisor")
 }
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+data class EnvironmentStatus(
+  val isOnline: Boolean,
+  val isFirebaseReady: Boolean
+)
+
+class MainViewModel(
+  application: Application,
+  private val savedStateHandle: SavedStateHandle = SavedStateHandle()
+) : AndroidViewModel(application) {
 
   val bankRepo = PromptBankRepository(application)
   private val database = AppDatabase.getDatabase(application)
@@ -62,6 +78,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   private val audioRecorder = AudioRecorder()
   private val audioPlayer = StudioAudioPlayer(viewModelScope)
   private val geminiService = GeminiBeatService()
+
+  internal var environmentStatusProvider: () -> EnvironmentStatus = { evaluateEnvironmentStatus() }
+
+  private var analysisJob: Job? = null
+  private var aiJob: Job? = null
+  private var transcribeJob: Job? = null
+  private var searchJob: Job? = null
 
   // Synced Waveform Playback State
   val isPlayingAudio: StateFlow<Boolean> = audioPlayer.isPlaying
@@ -207,61 +230,103 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   val takesList: StateFlow<List<TakeEntity>> = takeRepo.allTakes
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+  val bankLoadError: StateFlow<String?> = bankRepo.loadError
+  val playbackError: StateFlow<String?> = audioPlayer.playbackError
+
+  private val _audioError = MutableStateFlow<String?>(null)
+  val audioError: StateFlow<String?> = _audioError.asStateFlow()
+
+  private val _micPermissionDenied = MutableStateFlow(false)
+  val micPermissionDenied: StateFlow<Boolean> = _micPermissionDenied.asStateFlow()
+
   private val _takeFilterResult = MutableStateFlow("ALL")
   val takeFilterResult: StateFlow<String> = _takeFilterResult.asStateFlow()
 
   init {
     bankRepo.ensureLoaded()
-    resetToPreserveDefaults()
+    if (savedStateHandle.contains(KEY_JOB_TYPE)) {
+      restoreFromSavedState()
+    } else {
+      resetToPreserveDefaults()
+    }
+  }
+
+  fun retryPromptBankLoad() {
+    bankRepo.retryLoad()
+    if (bankRepo.isLoaded && _lyricsMap.value.isBlank()) {
+      resetToPreserveDefaults()
+    }
+  }
+
+  fun dismissAudioError() {
+    _audioError.value = null
+    audioPlayer.clearPlaybackError()
+  }
+
+  fun onMicrophonePermissionResult(granted: Boolean) {
+    _micPermissionDenied.value = !granted
+  }
+
+  fun dismissMicPermissionDenied() {
+    _micPermissionDenied.value = false
   }
 
   fun setTab(tab: StudioTab) {
     _currentTab.value = tab
+    savedStateHandle[KEY_TAB] = tab.name
   }
 
   fun setJobType(job: JobType) {
     _jobType.value = job
+    savedStateHandle[KEY_JOB_TYPE] = job.value
     if (job == JobType.PRESERVE) {
-      _variety.value = 0
-      _weirdness.value = 25
-      _styleInfluence.value = 70
-      _audioInfluence.value = 80
+      setVariety(0)
+      setWeirdness(25)
+      setStyleInfluence(70)
+      setAudioInfluence(80)
       ensureLockLineInStyle()
     } else {
-      _variety.value = 0
-      _weirdness.value = 20
-      _styleInfluence.value = 65
-      _audioInfluence.value = 0
+      setVariety(0)
+      setWeirdness(20)
+      setStyleInfluence(65)
+      setAudioInfluence(0)
       removeLockLineFromStyle()
     }
     _lyricsMap.value = bankRepo.buildV6LyricsMap(_activeLane.value, job)
+    savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
     updateSimplePrompt()
   }
 
   fun setLane(lane: String) {
     _activeLane.value = lane
+    savedStateHandle[KEY_LANE] = lane
     val drums = bankRepo.laneDrums(lane)
     if (_jobType.value == JobType.PRESERVE) {
       _stylePrompt.value = "$LOCK_LINE. Add $lane drums underneath only ($drums), spice only, sample stays lead."
     } else {
       _stylePrompt.value = "$lane instrumental, $drums, high energy, crisp mix."
     }
+    savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
     _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value)
+    savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
     updateSimplePrompt()
   }
 
   fun updateStylePrompt(text: String) {
     _stylePrompt.value = text
+    savedStateHandle[KEY_STYLE_PROMPT] = text
     resetHandoffSteps()
   }
 
   fun updateLyricsMap(text: String) {
     _lyricsMap.value = text
+    savedStateHandle[KEY_LYRICS_MAP] = text
     resetHandoffSteps()
   }
 
   fun updateExcludeText(text: String) {
     _excludeText.value = text
+    savedStateHandle[KEY_EXCLUDE_TEXT] = text
     resetHandoffSteps()
   }
 
@@ -295,17 +360,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 [End]"""
       }
     }
+    savedStateHandle[KEY_SIMPLE_PROMPT] = _simplePrompt.value
   }
 
-  fun setVariety(v: Int) { _variety.value = v }
-  fun setWeirdness(w: Int) { _weirdness.value = w }
-  fun setStyleInfluence(s: Int) { _styleInfluence.value = s }
-  fun setAudioInfluence(a: Int) { _audioInfluence.value = a }
+  fun setVariety(v: Int) {
+    val clamped = v.coerceIn(0, 100)
+    _variety.value = clamped
+    savedStateHandle[KEY_VARIETY] = clamped
+  }
+
+  fun setWeirdness(w: Int) {
+    val clamped = w.coerceIn(0, 100)
+    _weirdness.value = clamped
+    savedStateHandle[KEY_WEIRDNESS] = clamped
+  }
+
+  fun setStyleInfluence(s: Int) {
+    val clamped = s.coerceIn(0, 100)
+    _styleInfluence.value = clamped
+    savedStateHandle[KEY_STYLE_INFLUENCE] = clamped
+  }
+
+  fun setAudioInfluence(a: Int) {
+    val clamped = a.coerceIn(0, 100)
+    _audioInfluence.value = clamped
+    savedStateHandle[KEY_AUDIO_INFLUENCE] = clamped
+  }
 
   fun selectExcludeBank(name: String) {
     val bank = bankRepo.excludeBanks.find { it.name.equals(name, ignoreCase = true) }
     if (bank != null) {
       _excludeText.value = bank.text
+      savedStateHandle[KEY_EXCLUDE_TEXT] = bank.text
     }
   }
 
@@ -321,29 +407,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       .replace("[GENRE]", _activeLane.value)
     _stylePrompt.value = replaced
     if (_jobType.value == JobType.PRESERVE) ensureLockLineInStyle()
+    savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
     recordGeneratedPrompt(_stylePrompt.value, source = "Slot Inject")
   }
 
   fun randomizeAll() {
-    val lane = bankRepo.allLanes.random()
+    val lanePool = bankRepo.allLanes.ifEmpty { bankRepo.expansionLanes.map { it.name } }
+    val lane = lanePool.random()
     _activeLane.value = lane
+    savedStateHandle[KEY_LANE] = lane
     val drums = bankRepo.laneDrums(lane)
     if (_jobType.value == JobType.PRESERVE) {
       _stylePrompt.value = "$LOCK_LINE. Add $lane drums underneath only ($drums), spice only, sample stays lead."
-      _audioInfluence.value = Random.nextInt(75, 86)
-      _weirdness.value = Random.nextInt(20, 31)
-      _styleInfluence.value = Random.nextInt(65, 76)
-      _variety.value = 0
+      setAudioInfluence(Random.nextInt(75, 86))
+      setWeirdness(Random.nextInt(20, 31))
+      setStyleInfluence(Random.nextInt(65, 76))
+      setVariety(0)
     } else {
       _stylePrompt.value = "$lane instrumental, $drums, crisp modern mix."
-      _audioInfluence.value = 0
-      _weirdness.value = Random.nextInt(15, 26)
-      _styleInfluence.value = Random.nextInt(60, 71)
-      _variety.value = 0
+      setAudioInfluence(0)
+      setWeirdness(Random.nextInt(15, 26))
+      setStyleInfluence(Random.nextInt(60, 71))
+      setVariety(0)
     }
+    savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
     _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value)
+    savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
     if (bankRepo.excludeBanks.isNotEmpty()) {
       _excludeText.value = bankRepo.excludeBanks.random().text
+      savedStateHandle[KEY_EXCLUDE_TEXT] = _excludeText.value
     }
     updateSimplePrompt()
     recordGeneratedPrompt(_stylePrompt.value, source = "Randomize", lane = lane)
@@ -351,11 +443,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   private fun ensureLockLineInStyle() {
     if (!_stylePrompt.value.contains(LOCK_LINE)) {
-      _stylePrompt.value = if (_stylePrompt.value.isBlank()) {
+      val currentBody = _stylePrompt.value.trimStart()
+      _stylePrompt.value = if (currentBody.isBlank()) {
         "$LOCK_LINE. Add ${_activeLane.value} drums underneath only."
       } else {
-        "$LOCK_LINE. ${_stylePrompt.value}"
+        val prefix = "$LOCK_LINE. "
+        val budget = (STYLE_LIMIT - prefix.length).coerceAtLeast(0)
+        val clippedBody = if (currentBody.length <= budget) currentBody else currentBody.take(budget).trimEnd()
+        if (clippedBody.isEmpty()) LOCK_LINE else "$prefix$clippedBody"
       }
+      savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
     }
   }
 
@@ -364,6 +461,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
       .replace("$LOCK_LINE. ", "")
       .replace(LOCK_LINE, "")
       .trim()
+    savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
   }
 
   fun resetToPreserveDefaults() {
@@ -380,21 +478,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     _styleInfluence.value = 70
     _audioInfluence.value = 80
     updateSimplePrompt()
+    persistAllCoreState()
   }
 
   // Audio Actions
   fun startRecording() {
     if (_isRecording.value) return
+    _audioError.value = null
+    _micPermissionDenied.value = false
+    analysisJob?.cancel()
+    aiJob?.cancel()
     audioPlayer.stop()
     val started = audioRecorder.startRecording { peak, db ->
       _recordingPeak.value = peak
       _recordingDb.value = db
     }
-    if (started) {
-      _isRecording.value = true
-      rollingWaveformBuffer.fill(0.05f)
-      _liveWaveform.value = rollingWaveformBuffer.copyOf()
-      viewModelScope.launch {
+    if (!started) {
+      _audioError.value = "Unable to access microphone. Check audio permissions or close other recording apps."
+      return
+    }
+    _isRecording.value = true
+    rollingWaveformBuffer.fill(0.05f)
+    _liveWaveform.value = rollingWaveformBuffer.copyOf()
+    analysisJob = viewModelScope.launch {
+      try {
         val samples = audioRecorder.recordAudio(maxDurationSec = 15) { peak, db, blockPeaks ->
           _recordingPeak.value = peak
           _recordingDb.value = db
@@ -426,8 +533,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lane = result.suggestedLane,
             bpm = result.bpm?.toInt()
           )
-          runAiBeatConsultation(result, wavBytes)
+          aiJob = launch {
+            runAiBeatConsultation(result, wavBytes)
+          }
+        } else {
+          _audioError.value = "No audio frames were captured from the microphone."
         }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        _audioError.value = e.localizedMessage ?: "Audio recording analysis failed."
+      } finally {
+        _isRecording.value = false
+        _isAnalyzing.value = false
       }
     }
   }
@@ -438,35 +556,69 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   fun analyzeFile(uri: Uri, fileName: String) {
-    viewModelScope.launch {
+    if (uri == Uri.EMPTY) {
+      _audioError.value = "No valid audio file URI was provided."
+      return
+    }
+    _audioError.value = null
+    analysisJob?.cancel()
+    aiJob?.cancel()
+    analysisJob = viewModelScope.launch {
       audioPlayer.stop()
       _isAnalyzing.value = true
-      val analyzedClip = audioAnalyzer.analyzeAudioUriWithClip(uri, fileName)
-      val result = analyzedClip.result
-      _audioAnalysis.value = result
-      lastAnalyzedWavBytes = analyzedClip.multimodalWavBytes
-      val fallbackMs = (result.durationSec * 1000.0).toLong().coerceAtLeast(1000L)
-      audioPlayer.loadUri(getApplication(), uri, fallbackMs)
-      _isAnalyzing.value = false
-      val analyzedPrompt = if (_jobType.value == JobType.PRESERVE) result.promptPreserve else result.promptOriginal
-      recordGeneratedPrompt(
-        prompt = analyzedPrompt,
-        source = "Analyze",
-        lane = result.suggestedLane,
-        bpm = result.bpm?.toInt()
-      )
-      runAiBeatConsultation(result, analyzedClip.multimodalWavBytes)
+      try {
+        val analyzedClip = audioAnalyzer.analyzeAudioUriWithClip(uri, fileName)
+        val result = analyzedClip.result
+        _audioAnalysis.value = result
+        lastAnalyzedWavBytes = analyzedClip.multimodalWavBytes
+        val fallbackMs = (result.durationSec * 1000.0).toLong().coerceAtLeast(1000L)
+        audioPlayer.loadUri(getApplication(), uri, fallbackMs)
+        _isAnalyzing.value = false
+        val analyzedPrompt = if (_jobType.value == JobType.PRESERVE) result.promptPreserve else result.promptOriginal
+        recordGeneratedPrompt(
+          prompt = analyzedPrompt,
+          source = "Analyze",
+          lane = result.suggestedLane,
+          bpm = result.bpm?.toInt()
+        )
+        aiJob = launch {
+          runAiBeatConsultation(result, analyzedClip.multimodalWavBytes)
+        }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        _audioError.value = e.localizedMessage ?: "Could not decode selected audio file."
+      } finally {
+        _isAnalyzing.value = false
+      }
     }
   }
 
   fun retryAiConsultation() {
     val result = _audioAnalysis.value ?: return
-    viewModelScope.launch {
+    aiJob?.cancel()
+    aiJob = viewModelScope.launch {
       runAiBeatConsultation(result, lastAnalyzedWavBytes)
     }
   }
 
   private suspend fun runAiBeatConsultation(result: AudioAnalysisResult, wavBytes: ByteArray?) {
+    val env = environmentStatusProvider()
+    if (!env.isOnline) {
+      _aiConsultationState.value = AiConsultationUiState.Error(
+        message = "Offline — reconnect to consult Cloud AI. Local DSP, 41 lanes, and Prompt Builder still work offline.",
+        canRetry = true
+      )
+      return
+    }
+    if (!env.isFirebaseReady) {
+      _aiConsultationState.value = AiConsultationUiState.Error(
+        message = "Firebase AI service unavailable. Verify configuration and tap Retry.",
+        canRetry = true
+      )
+      return
+    }
+
     _aiConsultationState.value = AiConsultationUiState.Loading(
       if (wavBytes != null && wavBytes.isNotEmpty()) {
         "Listening to audio & consulting Gemini 3.8 Flash + Search Grounding..."
@@ -547,6 +699,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   fun startMicTranscription(target: TranscriptionTarget) {
     if (_isRecording.value) return
+    _audioError.value = null
+    _micPermissionDenied.value = false
+    transcribeJob?.cancel()
     audioPlayer.stop()
     val started = audioRecorder.startRecording { peak, db ->
       _recordingPeak.value = peak
@@ -565,24 +720,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     lastTranscriptionTarget = target
     _micTranscriptionState.value = TranscriptionUiState.Recording(target, -60f)
 
-    viewModelScope.launch {
-      val samples = audioRecorder.recordAudio(maxDurationSec = 12) { peak, db, _ ->
-        _recordingPeak.value = peak
-        _recordingDb.value = db
-        _micTranscriptionState.value = TranscriptionUiState.Recording(target, db)
-      }
-      _isRecording.value = false
-      if (samples.isEmpty()) {
+    transcribeJob = viewModelScope.launch {
+      try {
+        val samples = audioRecorder.recordAudio(maxDurationSec = 12) { peak, db, _ ->
+          _recordingPeak.value = peak
+          _recordingDb.value = db
+          _micTranscriptionState.value = TranscriptionUiState.Recording(target, db)
+        }
+        _isRecording.value = false
+        if (samples.isEmpty()) {
+          _micTranscriptionState.value = TranscriptionUiState.Error(
+            message = "No audio captured from microphone.",
+            target = target,
+            canRetry = true
+          )
+          return@launch
+        }
+        val wavBytes = audioAnalyzer.encodeWav16KhzMono(samples, 44100, maxSeconds = 12)
+        lastTranscriptionWavBytes = wavBytes
+        executeTranscription(wavBytes, target)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
         _micTranscriptionState.value = TranscriptionUiState.Error(
-          message = "No audio captured from microphone.",
+          message = e.localizedMessage ?: "Microphone capture failed.",
           target = target,
           canRetry = true
         )
-        return@launch
+      } finally {
+        _isRecording.value = false
       }
-      val wavBytes = audioAnalyzer.encodeWav16KhzMono(samples, 44100, maxSeconds = 12)
-      lastTranscriptionWavBytes = wavBytes
-      executeTranscription(wavBytes, target)
     }
   }
 
@@ -594,7 +761,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   fun retryLastTranscription() {
     val wavBytes = lastTranscriptionWavBytes ?: return
     val target = lastTranscriptionTarget
-    viewModelScope.launch {
+    transcribeJob?.cancel()
+    transcribeJob = viewModelScope.launch {
       executeTranscription(wavBytes, target)
     }
   }
@@ -606,6 +774,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   private suspend fun executeTranscription(wavBytes: ByteArray, target: TranscriptionTarget) {
+    val env = environmentStatusProvider()
+    if (!env.isOnline) {
+      _micTranscriptionState.value = TranscriptionUiState.Error(
+        message = "Offline — reconnect to transcribe audio with Gemini. Saved audio is kept for Retry.",
+        target = target,
+        canRetry = true
+      )
+      return
+    }
+    if (!env.isFirebaseReady) {
+      _micTranscriptionState.value = TranscriptionUiState.Error(
+        message = "Firebase AI service unavailable. Tap Retry when configured.",
+        target = target,
+        canRetry = true
+      )
+      return
+    }
+
     _micTranscriptionState.value = TranscriptionUiState.Transcribing(target)
     try {
       val transcript = geminiService.transcribeMicrophoneAudio(wavBytes, target)
@@ -662,8 +848,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     if (clean.isEmpty()) return
     val current = _stylePrompt.value.trim()
     val combined = if (current.isBlank()) clean else "$current, $clean"
-    updateStylePrompt(combined.take(STYLE_LIMIT))
-    if (_jobType.value == JobType.PRESERVE) ensureLockLineInStyle()
+    val finalStyle = if (_jobType.value == JobType.PRESERVE && !combined.contains(LOCK_LINE)) {
+      val prefix = "$LOCK_LINE. "
+      val budget = (STYLE_LIMIT - prefix.length).coerceAtLeast(0)
+      val body = if (combined.length <= budget) combined else combined.take(budget).trimEnd()
+      if (body.isEmpty()) LOCK_LINE else "$prefix$body"
+    } else {
+      combined.take(STYLE_LIMIT)
+    }
+    updateStylePrompt(finalStyle)
     if (context != null) {
       Toast.makeText(context, "Added voice note to Style Prompt", Toast.LENGTH_SHORT).show()
     }
@@ -672,7 +865,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   fun searchSunoKnowledge(query: String) {
     val clean = query.trim()
     if (clean.isEmpty()) return
-    viewModelScope.launch {
+    searchJob?.cancel()
+    val env = environmentStatusProvider()
+    if (!env.isOnline) {
+      _searchGroundingState.value = SearchGroundingUiState.Error(
+        message = "Offline — reconnect to run Google Search Grounding, then tap Retry.",
+        query = clean
+      )
+      return
+    }
+    if (!env.isFirebaseReady) {
+      _searchGroundingState.value = SearchGroundingUiState.Error(
+        message = "Firebase AI service unavailable. Tap Retry when configured.",
+        query = clean
+      )
+      return
+    }
+
+    searchJob = viewModelScope.launch {
       _searchGroundingState.value = SearchGroundingUiState.Loading(clean)
       try {
         val result = geminiService.researchWithGoogleSearch(clean)
@@ -694,6 +904,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   fun clearSearchGrounding() {
+    searchJob?.cancel()
     _searchGroundingState.value = SearchGroundingUiState.Idle
   }
 
@@ -714,7 +925,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val before = currentComplianceSnapshot()
     val fixed = SunoComplianceAuditor.autoFixRule(ruleId, before, _activeLane.value)
     if (fixed == before) return
-    _complianceUndoSnapshot.value = before.copy(fixSummary = fixed.fixSummary)
+    val undoWithSummary = before.copy(fixSummary = fixed.fixSummary)
+    _complianceUndoSnapshot.value = undoWithSummary
+    savedStateHandle[KEY_COMPLIANCE_UNDO] = undoWithSummary.toJson()
     applyComplianceSnapshot(fixed)
     if (context != null && fixed.fixSummary.isNotBlank()) {
       Toast.makeText(context, fixed.fixSummary, Toast.LENGTH_SHORT).show()
@@ -725,7 +938,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val before = currentComplianceSnapshot()
     val fixed = SunoComplianceAuditor.autoFixAll(before, _activeLane.value)
     if (fixed == before) return
-    _complianceUndoSnapshot.value = before.copy(fixSummary = fixed.fixSummary)
+    val undoWithSummary = before.copy(fixSummary = fixed.fixSummary)
+    _complianceUndoSnapshot.value = undoWithSummary
+    savedStateHandle[KEY_COMPLIANCE_UNDO] = undoWithSummary.toJson()
     applyComplianceSnapshot(fixed)
     if (context != null && fixed.fixSummary.isNotBlank()) {
       Toast.makeText(context, fixed.fixSummary, Toast.LENGTH_SHORT).show()
@@ -736,6 +951,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val prev = _complianceUndoSnapshot.value ?: return
     applyComplianceSnapshot(prev)
     _complianceUndoSnapshot.value = null
+    savedStateHandle.remove<String>(KEY_COMPLIANCE_UNDO)
     if (context != null) {
       Toast.makeText(context, "Reverted compliance auto-fix", Toast.LENGTH_SHORT).show()
     }
@@ -743,6 +959,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   fun dismissComplianceUndo() {
     _complianceUndoSnapshot.value = null
+    savedStateHandle.remove<String>(KEY_COMPLIANCE_UNDO)
   }
 
   private fun applyComplianceSnapshot(snapshot: ComplianceSnapshot) {
@@ -756,6 +973,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     _audioInfluence.value = snapshot.audioInfluence
     updateSimplePrompt()
     resetHandoffSteps()
+    persistAllCoreState()
   }
 
   fun loadTakeIntoBuild(take: TakeEntity, context: Context? = null) {
@@ -764,9 +982,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     if (take.lane.isNotBlank() && bankRepo.allLanes.contains(take.lane)) {
       _activeLane.value = take.lane
     }
-    _stylePrompt.value = take.style
-    _excludeText.value = take.excludeText
-    _lyricsMap.value = take.lyrics.ifBlank { bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJobType) }
+    _stylePrompt.value = take.style.take(STYLE_LIMIT)
+    _excludeText.value = take.excludeText.take(EXCLUDE_LIMIT)
+    _lyricsMap.value = take.lyrics.ifBlank { bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJobType) }.take(LYRICS_LIMIT)
     if (resolvedJobType == JobType.PRESERVE) {
       _variety.value = 0
       _audioInfluence.value = 80
@@ -776,7 +994,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     updateSimplePrompt()
     resetHandoffSteps()
-    _currentTab.value = StudioTab.BUILD
+    setTab(StudioTab.BUILD)
+    persistAllCoreState()
     if (context != null) {
       Toast.makeText(context, "Loaded take '${take.name}' into Build", Toast.LENGTH_SHORT).show()
     }
@@ -817,6 +1036,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   fun applyBpmMatchedLanePreset(lane: String, overrideBpm: Double? = null) {
     _activeLane.value = lane
+    savedStateHandle[KEY_LANE] = lane
     val drums = bankRepo.laneDrums(lane)
     val analyzed = _audioAnalysis.value
     val bpmValue = overrideBpm ?: analyzed?.bpm
@@ -825,18 +1045,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     if (_jobType.value == JobType.PRESERVE) {
       _stylePrompt.value = "$LOCK_LINE. Add $lane drums underneath only ($drums)$bpmTag$keyTag, spice only, sample stays lead."
-      _variety.value = 0
-      _weirdness.value = 25
-      _styleInfluence.value = 70
-      _audioInfluence.value = 80
+      setVariety(0)
+      setWeirdness(25)
+      setStyleInfluence(70)
+      setAudioInfluence(80)
     } else {
       _stylePrompt.value = "$lane instrumental$bpmTag$keyTag, $drums, high energy, crisp mix."
-      _variety.value = 0
-      _weirdness.value = 20
-      _styleInfluence.value = 65
-      _audioInfluence.value = 0
+      setVariety(0)
+      setWeirdness(20)
+      setStyleInfluence(65)
+      setAudioInfluence(0)
     }
+    savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
     _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value)
+    savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
     updateSimplePrompt()
     resetHandoffSteps()
     recordGeneratedPrompt(
@@ -849,11 +1071,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   fun adjustBpmMultiplier(multiplier: Double) {
     val current = _audioAnalysis.value ?: return
+    if (multiplier.isNaN() || multiplier.isInfinite() || multiplier <= 0.0) return
     val curBpm = current.bpm ?: 130.0
-    val newBpm = curBpm * multiplier
+    val newBpm = (curBpm * multiplier).coerceIn(40.0, 260.0)
+    val roundedBpm = kotlin.math.round(newBpm * 10.0) / 10.0
+    val lowTag = if (current.lowShare > 0.36) "Sub-heavy" else "Balanced"
     _audioAnalysis.value = current.copy(
-      bpm = kotlin.math.round(newBpm * 10) / 10.0,
-      pocketLabel = "${newBpm.toInt()} BPM · ${if (current.centroidHz > 3000) "Bright" else "Dark"}"
+      bpm = roundedBpm,
+      pocketLabel = "${roundedBpm.toInt()} BPM · ${if (current.centroidHz > 2800) "Bright" else "Dark"} · $lowTag"
     )
   }
 
@@ -876,13 +1101,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     } else {
       _stylePrompt.value = a.promptOriginal
     }
+    savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
     recordGeneratedPrompt(
       prompt = _stylePrompt.value,
       source = "Send-to-Build",
       lane = a.suggestedLane,
       bpm = a.bpm?.toInt()
     )
-    _currentTab.value = StudioTab.BUILD
+    setTab(StudioTab.BUILD)
   }
 
   fun sendAnalysisToSimple() {
@@ -909,7 +1135,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 [Outro] (fade to clean finish)
 [End]"""
     }
-    _currentTab.value = StudioTab.SIMPLE
+    savedStateHandle[KEY_SIMPLE_PROMPT] = _simplePrompt.value
+    setTab(StudioTab.SIMPLE)
   }
 
   // Takes & Persistence Actions
@@ -988,18 +1215,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
   fun setTakeFilterResult(filter: String) {
     _takeFilterResult.value = filter
+    savedStateHandle[KEY_TAKE_FILTER] = filter
   }
 
   fun setLibraryQuery(q: String) {
     _libraryQuery.value = q
+    savedStateHandle[KEY_LIBRARY_QUERY] = q
   }
 
   fun setLibraryFilterTrack(track: String) {
     _libraryFilterTrack.value = track
+    savedStateHandle[KEY_LIBRARY_TRACK] = track
   }
 
   fun setLibraryFilterLane(lane: String) {
     _libraryFilterLane.value = lane
+    savedStateHandle[KEY_LIBRARY_LANE] = lane
   }
 
   fun copyToClipboard(context: Context, label: String, text: String) {
@@ -1033,15 +1264,19 @@ ${_lyricsMap.value}
 
   fun setCuratedSearchQuery(q: String) {
     _curatedSearchQuery.value = q
+    savedStateHandle[KEY_CURATED_QUERY] = q
   }
 
   fun setCuratedCategory(cat: String) {
     _curatedCategory.value = cat
+    savedStateHandle[KEY_CURATED_CATEGORY] = cat
   }
 
   fun clearCuratedFilters() {
     _curatedSearchQuery.value = ""
     _curatedCategory.value = "All"
+    savedStateHandle[KEY_CURATED_QUERY] = ""
+    savedStateHandle[KEY_CURATED_CATEGORY] = "All"
   }
 
   fun toggleFavorite(prompt: CuratedSunoPrompt, onResult: ((isSaved: Boolean, removedEntity: FavoritePromptEntity?) -> Unit)? = null) {
@@ -1109,8 +1344,9 @@ ${_lyricsMap.value}
     updateSimplePrompt()
     resetHandoffSteps()
     if (navigateToBuild) {
-      _currentTab.value = StudioTab.BUILD
+      setTab(StudioTab.BUILD)
     }
+    persistAllCoreState()
     if (context != null) {
       Toast.makeText(
         context,
@@ -1132,41 +1368,132 @@ ${_lyricsMap.value}
     }
   }
 
+  fun copyPromptHistoryToClipboard(context: Context, includeSnapshot: Boolean = true) {
+    viewModelScope.launch {
+      val entries = historyRepo.getRecentSnapshot()
+      val snapshot = if (includeSnapshot) currentComplianceSnapshot() else null
+      if (entries.isEmpty() && snapshot == null) {
+        Toast.makeText(context, "No prompt history entries to export.", Toast.LENGTH_SHORT).show()
+        return@launch
+      }
+      val json = historyRepo.exportHistoryJson(entries, snapshot)
+      copyToClipboard(context, "Prompt History JSON Backup", json)
+    }
+  }
+
+  fun exportPromptHistoryToUri(context: Context, uri: Uri, includeSnapshot: Boolean = true) {
+    viewModelScope.launch {
+      val entries = historyRepo.getRecentSnapshot()
+      val snapshot = if (includeSnapshot) currentComplianceSnapshot() else null
+      val json = historyRepo.exportHistoryJson(entries, snapshot)
+      val writeError = withContext(Dispatchers.IO) {
+        try {
+          context.contentResolver.openOutputStream(uri)?.use { stream ->
+            stream.write(json.toByteArray(Charsets.UTF_8))
+            stream.flush()
+            null
+          } ?: "Unable to open destination file."
+        } catch (e: Exception) {
+          e.localizedMessage ?: "Failed writing backup file."
+        }
+      }
+      if (writeError == null) {
+        Toast.makeText(context, "Saved ${entries.size} prompt(s) to JSON file", Toast.LENGTH_SHORT).show()
+      } else {
+        Toast.makeText(context, writeError, Toast.LENGTH_LONG).show()
+      }
+    }
+  }
+
+  fun importPromptHistoryFromJson(
+    context: Context,
+    jsonStr: String,
+    restoreSnapshot: Boolean = true
+  ) {
+    viewModelScope.launch {
+      val result = historyRepo.importHistoryJson(jsonStr)
+      if (restoreSnapshot && result.restoredSnapshot != null) {
+        val before = currentComplianceSnapshot().copy(fixSummary = "Imported Backup Snapshot")
+        _complianceUndoSnapshot.value = before
+        savedStateHandle[KEY_COMPLIANCE_UNDO] = before.toJson()
+        applyComplianceSnapshot(result.restoredSnapshot)
+      }
+      val msg = when {
+        result.errorMessage != null && result.importedCount == 0 && result.restoredSnapshot == null ->
+          result.errorMessage
+        result.skippedCount > 0 ->
+          "Imported ${result.importedCount} prompt(s) (${result.skippedCount} skipped)"
+        result.restoredSnapshot != null && result.importedCount == 0 ->
+          "Restored Studio Compliance Snapshot"
+        result.restoredSnapshot != null ->
+          "Imported ${result.importedCount} prompt(s) & restored snapshot"
+        else ->
+          "Imported ${result.importedCount} prompt(s) into Recent 20"
+      }
+      Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun importPromptHistoryFromUri(
+    context: Context,
+    uri: Uri,
+    restoreSnapshot: Boolean = true
+  ) {
+    viewModelScope.launch {
+      val readResult = withContext(Dispatchers.IO) {
+        try {
+          context.contentResolver.openInputStream(uri)?.use { stream ->
+            val maxBytes = 2 * 1024 * 1024
+            val bytes = stream.readNBytes(maxBytes)
+            Pair(String(bytes, Charsets.UTF_8), null as String?)
+          } ?: Pair("", "Unable to read selected JSON file.")
+        } catch (e: Exception) {
+          Pair("", e.localizedMessage ?: "Failed to open selected file.")
+        }
+      }
+      val error = readResult.second
+      if (error != null) {
+        Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+        return@launch
+      }
+      importPromptHistoryFromJson(context, readResult.first, restoreSnapshot)
+    }
+  }
+
   // Suno Handoff Checklist Tracking (Steps 1..5)
   private val _handoffStepsDone = MutableStateFlow<Set<Int>>(emptySet())
   val handoffStepsDone: StateFlow<Set<Int>> = _handoffStepsDone.asStateFlow()
 
   fun resetHandoffSteps() {
     _handoffStepsDone.value = emptySet()
+    savedStateHandle[KEY_HANDOFF_STEPS] = intArrayOf()
   }
 
   fun copyHandoffStep(context: Context, step: Int) {
     val isPreserve = _jobType.value == JobType.PRESERVE
     when (step) {
-      1 -> { // Route
+      1 -> {
         val routeText = if (isPreserve) "Route: Extend | Audio Influence: ${_audioInfluence.value}" else "Route: Create (Standard)"
         copyToClipboard(context, "Route Guidance", routeText)
       }
-      2 -> { // Style
-        copyToClipboard(context, "Style Prompt", _stylePrompt.value)
-      }
-      3 -> { // Exclude
-        copyToClipboard(context, "Exclude Styles", _excludeText.value)
-      }
-      4 -> { // Lyrics
-        copyToClipboard(context, "Lyrics Map", _lyricsMap.value)
-      }
-      5 -> { // Settings
+      2 -> copyToClipboard(context, "Style Prompt", _stylePrompt.value)
+      3 -> copyToClipboard(context, "Exclude Styles", _excludeText.value)
+      4 -> copyToClipboard(context, "Lyrics Map", _lyricsMap.value)
+      5 -> {
         val settingsText = "Model v6 · Variety ${_variety.value} · Weirdness ${_weirdness.value} · Style Influence ${_styleInfluence.value} · Audio Influence ${_audioInfluence.value}"
         copyToClipboard(context, "Suno Settings", settingsText)
       }
     }
-    _handoffStepsDone.value = _handoffStepsDone.value + step
+    val next = _handoffStepsDone.value + step
+    _handoffStepsDone.value = next
+    savedStateHandle[KEY_HANDOFF_STEPS] = next.toIntArray()
   }
 
   fun toggleHandoffStep(step: Int) {
     val current = _handoffStepsDone.value
-    _handoffStepsDone.value = if (current.contains(step)) current - step else current + step
+    val next = if (current.contains(step)) current - step else current + step
+    _handoffStepsDone.value = next
+    savedStateHandle[KEY_HANDOFF_STEPS] = next.toIntArray()
   }
 
   fun loadFullPreservePackageFromAnalysis() {
@@ -1178,12 +1505,13 @@ ${_lyricsMap.value}
     if (bankRepo.excludeBanks.isNotEmpty()) {
       _excludeText.value = bankRepo.excludeBanks[0].text
     }
-    _variety.value = 0
-    _weirdness.value = 25
-    _styleInfluence.value = 70
-    _audioInfluence.value = 80
+    setVariety(0)
+    setWeirdness(25)
+    setStyleInfluence(70)
+    setAudioInfluence(80)
     updateSimplePrompt()
     resetHandoffSteps()
+    persistAllCoreState()
     recordGeneratedPrompt(
       prompt = a.promptPreserve,
       source = "Send-to-Build",
@@ -1191,7 +1519,7 @@ ${_lyricsMap.value}
       jobType = JobType.PRESERVE,
       bpm = a.bpm?.toInt()
     )
-    _currentTab.value = StudioTab.BUILD
+    setTab(StudioTab.BUILD)
   }
 
   fun exportTakes(context: Context, asJson: Boolean = true) {
@@ -1214,19 +1542,30 @@ ${_lyricsMap.value}
       }
       val shareIntent = Intent.createChooser(sendIntent, "Export Production Takes")
       shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      context.startActivity(shareIntent)
+      launchExternalChooser(context, shareIntent, "No share target app available on this device.")
     }
   }
 
   fun importTakes(context: Context, jsonStr: String) {
     viewModelScope.launch {
-      val count = takeRepo.importTakesJson(jsonStr)
-      Toast.makeText(context, "Imported $count take(s) into Logbook", Toast.LENGTH_SHORT).show()
+      val res = takeRepo.importTakesDetailed(jsonStr)
+      val msg = when {
+        res.errorMessage != null && res.importedCount == 0 -> res.errorMessage
+        res.skippedCount > 0 -> "Imported ${res.importedCount} take(s) (${res.skippedCount} skipped)"
+        else -> "Imported ${res.importedCount} take(s) into Logbook"
+      }
+      Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     }
   }
 
-  fun sharePrompt(context: Context, title: String, text: String) {
-    addRecentPrompt(text)
+  fun sharePrompt(
+    context: Context,
+    title: String,
+    text: String,
+    source: String = "Share",
+    lane: String = _activeLane.value
+  ) {
+    addRecentPrompt(text, source = source, lane = lane)
     val sendIntent = Intent().apply {
       action = Intent.ACTION_SEND
       putExtra(Intent.EXTRA_TITLE, title)
@@ -1236,7 +1575,7 @@ ${_lyricsMap.value}
     }
     val shareIntent = Intent.createChooser(sendIntent, "Share Suno Style Prompt")
     shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    context.startActivity(shareIntent)
+    launchExternalChooser(context, shareIntent, "No share app available to handle text.")
   }
 
   fun exportFavorites(context: Context, asJson: Boolean = true) {
@@ -1259,21 +1598,148 @@ ${_lyricsMap.value}
       }
       val shareIntent = Intent.createChooser(sendIntent, "Export Favorite Prompts")
       shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      context.startActivity(shareIntent)
+      launchExternalChooser(context, shareIntent, "No share app available to handle favorites export.")
     }
   }
 
   fun importFavorites(context: Context, jsonStr: String) {
     viewModelScope.launch {
-      val count = favoriteRepo.importFavoritesJson(jsonStr)
-      Toast.makeText(context, "Imported $count favorite prompt(s)", Toast.LENGTH_SHORT).show()
+      val res = favoriteRepo.importFavoritesDetailed(jsonStr)
+      val msg = when {
+        res.errorMessage != null && res.importedCount == 0 -> res.errorMessage
+        res.skippedCount > 0 -> "Imported ${res.importedCount} favorite(s) (${res.skippedCount} skipped)"
+        else -> "Imported ${res.importedCount} favorite prompt(s)"
+      }
+      Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     }
+  }
+
+  private fun launchExternalChooser(context: Context, intent: Intent, fallbackMsg: String) {
+    try {
+      context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+      Toast.makeText(context, fallbackMsg, Toast.LENGTH_SHORT).show()
+    } catch (_: Exception) {
+      Toast.makeText(context, fallbackMsg, Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  private fun evaluateEnvironmentStatus(): EnvironmentStatus {
+    val appCtx = getApplication<Application>()
+    val isOnline = try {
+      val cm = appCtx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+      val activeNet = cm?.activeNetwork
+      val caps = if (activeNet != null) cm.getNetworkCapabilities(activeNet) else null
+      caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    } catch (_: Exception) {
+      true
+    }
+    val firebaseReady = try {
+      if (FirebaseApp.getApps(appCtx).isEmpty()) {
+        FirebaseApp.initializeApp(appCtx) != null
+      } else {
+        true
+      }
+    } catch (_: Exception) {
+      false
+    }
+    return EnvironmentStatus(isOnline = isOnline, isFirebaseReady = firebaseReady)
+  }
+
+  private fun restoreFromSavedState() {
+    val savedTabName = savedStateHandle.get<String>(KEY_TAB)
+    _currentTab.value = savedTabName?.let {
+      try { StudioTab.valueOf(it) } catch (_: Exception) { StudioTab.BUILD }
+    } ?: StudioTab.BUILD
+
+    val savedJob = savedStateHandle.get<String>(KEY_JOB_TYPE) ?: JobType.PRESERVE.value
+    _jobType.value = JobType.fromString(savedJob)
+
+    val savedLane = savedStateHandle.get<String>(KEY_LANE) ?: "Trap"
+    _activeLane.value = savedLane
+
+    _stylePrompt.value = savedStateHandle.get<String>(KEY_STYLE_PROMPT)
+      ?: "$LOCK_LINE. Add $savedLane drums underneath only (${bankRepo.laneDrums(savedLane)}), spice only, sample stays lead."
+    _lyricsMap.value = savedStateHandle.get<String>(KEY_LYRICS_MAP)
+      ?: bankRepo.buildV6LyricsMap(savedLane, _jobType.value)
+    _excludeText.value = savedStateHandle.get<String>(KEY_EXCLUDE_TEXT)
+      ?: bankRepo.excludeBanks.firstOrNull()?.text.orEmpty()
+
+    _variety.value = (savedStateHandle.get<Int>(KEY_VARIETY) ?: 0).coerceIn(0, 100)
+    _weirdness.value = (savedStateHandle.get<Int>(KEY_WEIRDNESS) ?: 25).coerceIn(0, 100)
+    _styleInfluence.value = (savedStateHandle.get<Int>(KEY_STYLE_INFLUENCE) ?: 70).coerceIn(0, 100)
+    _audioInfluence.value = (savedStateHandle.get<Int>(KEY_AUDIO_INFLUENCE) ?: 80).coerceIn(0, 100)
+
+    val savedSimple = savedStateHandle.get<String>(KEY_SIMPLE_PROMPT)
+    if (savedSimple != null) {
+      _simplePrompt.value = savedSimple
+    } else {
+      updateSimplePrompt()
+    }
+
+    _curatedSearchQuery.value = savedStateHandle.get<String>(KEY_CURATED_QUERY) ?: ""
+    _curatedCategory.value = savedStateHandle.get<String>(KEY_CURATED_CATEGORY) ?: "All"
+    _libraryQuery.value = savedStateHandle.get<String>(KEY_LIBRARY_QUERY) ?: ""
+    _libraryFilterTrack.value = savedStateHandle.get<String>(KEY_LIBRARY_TRACK) ?: "All"
+    _libraryFilterLane.value = savedStateHandle.get<String>(KEY_LIBRARY_LANE) ?: "All"
+    _takeFilterResult.value = savedStateHandle.get<String>(KEY_TAKE_FILTER) ?: "ALL"
+    _handoffStepsDone.value = savedStateHandle.get<IntArray>(KEY_HANDOFF_STEPS)?.toSet() ?: emptySet()
+    _complianceUndoSnapshot.value = ComplianceSnapshot.fromJson(savedStateHandle.get<String>(KEY_COMPLIANCE_UNDO))
+  }
+
+  private fun persistAllCoreState() {
+    savedStateHandle[KEY_TAB] = _currentTab.value.name
+    savedStateHandle[KEY_JOB_TYPE] = _jobType.value.value
+    savedStateHandle[KEY_LANE] = _activeLane.value
+    savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
+    savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
+    savedStateHandle[KEY_EXCLUDE_TEXT] = _excludeText.value
+    savedStateHandle[KEY_VARIETY] = _variety.value
+    savedStateHandle[KEY_WEIRDNESS] = _weirdness.value
+    savedStateHandle[KEY_STYLE_INFLUENCE] = _styleInfluence.value
+    savedStateHandle[KEY_AUDIO_INFLUENCE] = _audioInfluence.value
+    savedStateHandle[KEY_SIMPLE_PROMPT] = _simplePrompt.value
+  }
+
+  internal fun setAnalysisForTest(result: AudioAnalysisResult) {
+    _audioAnalysis.value = result
+  }
+
+  internal fun setPendingTranscriptionForTest(wavBytes: ByteArray, target: TranscriptionTarget) {
+    lastTranscriptionWavBytes = wavBytes
+    lastTranscriptionTarget = target
   }
 
   override fun onCleared() {
     super.onCleared()
+    analysisJob?.cancel()
+    aiJob?.cancel()
+    transcribeJob?.cancel()
+    searchJob?.cancel()
     audioRecorder.stopRecording()
     audioPlayer.release()
+  }
+
+  companion object {
+    private const val KEY_TAB = "studio_tab"
+    private const val KEY_JOB_TYPE = "job_type"
+    private const val KEY_LANE = "active_lane"
+    private const val KEY_STYLE_PROMPT = "style_prompt"
+    private const val KEY_LYRICS_MAP = "lyrics_map"
+    private const val KEY_EXCLUDE_TEXT = "exclude_text"
+    private const val KEY_VARIETY = "variety"
+    private const val KEY_WEIRDNESS = "weirdness"
+    private const val KEY_STYLE_INFLUENCE = "style_influence"
+    private const val KEY_AUDIO_INFLUENCE = "audio_influence"
+    private const val KEY_SIMPLE_PROMPT = "simple_prompt"
+    private const val KEY_CURATED_QUERY = "curated_search_query"
+    private const val KEY_CURATED_CATEGORY = "curated_category"
+    private const val KEY_LIBRARY_QUERY = "library_query"
+    private const val KEY_LIBRARY_TRACK = "library_filter_track"
+    private const val KEY_LIBRARY_LANE = "library_filter_lane"
+    private const val KEY_TAKE_FILTER = "take_filter_result"
+    private const val KEY_HANDOFF_STEPS = "handoff_steps_done"
+    private const val KEY_COMPLIANCE_UNDO = "compliance_undo_snapshot"
   }
 }
 

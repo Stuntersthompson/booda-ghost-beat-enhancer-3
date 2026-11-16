@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +21,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +53,8 @@ fun TakesScreen(viewModel: MainViewModel) {
   var compareTakeAId by rememberSaveable { mutableStateOf<Long?>(null) }
   var compareTakeBId by rememberSaveable { mutableStateOf<Long?>(null) }
   var showCompareCard by rememberSaveable { mutableStateOf(false) }
+  var showImportModal by rememberSaveable { mutableStateOf(false) }
+  var importJsonInput by rememberSaveable { mutableStateOf("") }
 
   val takeA = remember(takesList, compareTakeAId) {
     takesList.find { it.id == compareTakeAId } ?: takesList.getOrNull(0)
@@ -68,248 +74,201 @@ fun TakesScreen(viewModel: MainViewModel) {
     else takesList.filter { it.result.equals(filterResult, ignoreCase = true) }
   }
 
-  LazyColumn(
-    modifier = Modifier
-      .fillMaxSize()
-      .background(StudioBg)
-      .padding(horizontal = 14.dp)
-      .testTag("takes_list"),
-    contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
-  ) {
-    // Header & Win-Rate KPI Card with Mode/Lane Breakdown
-    item {
-      Column {
-        Text(
-          text = "PRODUCTION LOGBOOK (TAKES)",
-          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-          color = AmberGold
-        )
-        Text(
-          text = "Local Room database log tracking your Suno v6 takes, lane win rates, and side-by-side A/B prompt diffs.",
-          style = MaterialTheme.typography.bodyMedium,
-          color = TextSecondary
-        )
+  val headerAndAnalyticsBlock: @Composable () -> Unit = {
+    Column {
+      Text(
+        text = "PRODUCTION LOGBOOK (TAKES)",
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        color = AmberGold
+      )
+      Text(
+        text = "Local Room database log tracking your Suno v6 takes, lane win rates, and side-by-side A/B prompt diffs.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = TextSecondary
+      )
 
-        Spacer(modifier = Modifier.height(10.dp))
+      Spacer(modifier = Modifier.height(10.dp))
 
-        TakesAnalyticsCard(analytics = analytics)
-      }
+      TakesAnalyticsCard(analytics = analytics)
     }
+  }
 
-    // Dual Export, Import & A/B Compare Tools
-    item {
-      var showImportModal by rememberSaveable { mutableStateOf(false) }
-      var importJsonInput by rememberSaveable { mutableStateOf("") }
-
-      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          OutlinedButton(
-            onClick = { viewModel.exportTakes(context, asJson = false) },
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = AmberGold),
-            shape = RoundedCornerShape(8.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp).testTag("action_export_takes_text")
-          ) {
-            Icon(Icons.AutoMirrored.Filled.Article, contentDescription = null, tint = AmberGold, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Export Text", style = MaterialTheme.typography.labelSmall, color = AmberGold)
-          }
-
-          OutlinedButton(
-            onClick = { viewModel.exportTakes(context, asJson = true) },
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = StudioCyan),
-            shape = RoundedCornerShape(8.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp).testTag("action_export_takes_json")
-          ) {
-            Icon(Icons.Default.Code, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Export JSON", style = MaterialTheme.typography.labelSmall, color = StudioCyan)
-          }
-
-          Button(
-            onClick = { showImportModal = true },
-            colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
-            shape = RoundedCornerShape(8.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            modifier = Modifier.weight(0.9f).defaultMinSize(minHeight = 44.dp).testTag("action_import_takes")
-          ) {
-            Icon(Icons.Default.FileDownload, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Import", style = MaterialTheme.typography.labelSmall, color = TextPrimary)
-          }
-        }
-
-        if (takesList.size >= 2) {
-          Button(
-            onClick = {
-              if (!showCompareCard && takeA != null && takeB != null) {
-                compareTakeAId = takeA.id
-                compareTakeBId = takeB.id
-              }
-              showCompareCard = !showCompareCard
-            },
-            colors = ButtonDefaults.buttonColors(
-              containerColor = if (showCompareCard) StudioCyan else StudioCardElevated
-            ),
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier
-              .fillMaxWidth()
-              .defaultMinSize(minHeight = 48.dp)
-              .testTag("action_toggle_ab_compare")
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.CompareArrows,
-              contentDescription = null,
-              tint = if (showCompareCard) Color.Black else StudioCyan,
-              modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-              text = if (showCompareCard) "Hide A/B Prompt Diff" else "Compare Two Takes (A/B Diff)",
-              style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-              color = if (showCompareCard) Color.Black else StudioCyan
-            )
-          }
-        }
-      }
-
-      if (showImportModal) {
-        AlertDialog(
-          onDismissRequest = { showImportModal = false },
-          title = { Text("Import Takes to Logbook", color = TextPrimary) },
-          text = {
-            Column {
-              Text("Paste JSON takes backup below. Existing takes are safely preserved (merge-only import):", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
-              Spacer(modifier = Modifier.height(8.dp))
-              OutlinedTextField(
-                value = importJsonInput,
-                onValueChange = { importJsonInput = it },
-                placeholder = { Text("Paste JSON array or envelope here...") },
-                modifier = Modifier.fillMaxWidth().height(140.dp),
-                textStyle = MonospacePrompt.copy(fontSize = 11.sp, color = TextPrimary)
-              )
-            }
-          },
-          confirmButton = {
-            Button(
-              onClick = {
-                if (importJsonInput.isNotBlank()) {
-                  viewModel.importTakes(context, importJsonInput)
-                  importJsonInput = ""
-                }
-                showImportModal = false
-              },
-              colors = ButtonDefaults.buttonColors(containerColor = StudioCyan)
-            ) {
-              Text("Import", color = Color.Black)
-            }
-          },
-          dismissButton = {
-            TextButton(onClick = { showImportModal = false }) {
-              Text("Cancel", color = TextSecondary)
-            }
-          },
-          containerColor = StudioCardElevated
-        )
-      }
-    }
-
-    // Collapsible A/B Prompt Diff Card
-    if (comparison != null) {
-      item {
-        TakeABDiffCard(
-          comparison = comparison,
-          onLoadTakeToBuild = { take -> viewModel.loadTakeIntoBuild(take, context) }
-        )
-      }
-    }
-
-    // Filter Chips
-    item {
-      val filterOptions = listOf("ALL", "WINNER", "PENDING", "MISS")
+  val exportImportCompareBlock: @Composable () -> Unit = {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
       ) {
-        filterOptions.forEach { opt ->
-          val selected = opt == filterResult
-          Surface(
-            color = if (selected) AmberGold else StudioCardElevated,
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier
-              .weight(1f)
-              .defaultMinSize(minHeight = 40.dp)
-              .clip(RoundedCornerShape(14.dp))
-              .clickable { viewModel.setTakeFilterResult(opt) }
-              .border(0.5.dp, StudioBorder, RoundedCornerShape(14.dp))
-              .testTag("filter_take_$opt")
-          ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(vertical = 8.dp)) {
-              Text(
-                text = opt,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = if (selected) Color.Black else TextPrimary
-              )
-            }
-          }
-        }
-      }
-    }
-
-    // Empty State
-    if (filteredTakes.isEmpty()) {
-      item {
-        Surface(
-          color = StudioCard,
-          shape = RoundedCornerShape(12.dp),
-          modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp)
+        OutlinedButton(
+          onClick = { viewModel.exportTakes(context, asJson = false) },
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = AmberGold),
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+          modifier = Modifier
+            .weight(1f)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics { contentDescription = "Export takes logbook as plain text" }
+            .testTag("action_export_takes_text")
         ) {
-          Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-          ) {
-            Icon(Icons.Default.Bookmarks, contentDescription = null, tint = TextMuted, modifier = Modifier.size(36.dp))
-            Spacer(modifier = Modifier.height(10.dp))
-            Text("No takes logged yet", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-            Text("Build a prompt package in the Build tab and tap 'Save Take' to log it here.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+          Icon(Icons.AutoMirrored.Filled.Article, contentDescription = null, tint = AmberGold, modifier = Modifier.size(14.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Export Text", style = MaterialTheme.typography.labelSmall, color = AmberGold)
+        }
+
+        OutlinedButton(
+          onClick = { viewModel.exportTakes(context, asJson = true) },
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = StudioCyan),
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+          modifier = Modifier
+            .weight(1f)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics { contentDescription = "Export takes logbook as JSON" }
+            .testTag("action_export_takes_json")
+        ) {
+          Icon(Icons.Default.Code, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(14.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Export JSON", style = MaterialTheme.typography.labelSmall, color = StudioCyan)
+        }
+
+        Button(
+          onClick = { showImportModal = true },
+          colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+          modifier = Modifier
+            .weight(0.9f)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics { contentDescription = "Import takes JSON into logbook" }
+            .testTag("action_import_takes")
+        ) {
+          Icon(Icons.Default.FileDownload, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Import", style = MaterialTheme.typography.labelSmall, color = TextPrimary)
+        }
+      }
+
+      if (takesList.size >= 2) {
+        Button(
+          onClick = {
+            if (!showCompareCard && takeA != null && takeB != null) {
+              compareTakeAId = takeA.id
+              compareTakeBId = takeB.id
+            }
+            showCompareCard = !showCompareCard
+          },
+          colors = ButtonDefaults.buttonColors(
+            containerColor = if (showCompareCard) StudioCyan else StudioCardElevated
+          ),
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics {
+              contentDescription = if (showCompareCard) "Hide side-by-side A/B take prompt diff" else "Compare two takes side by side"
+            }
+            .testTag("action_toggle_ab_compare")
+        ) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.CompareArrows,
+            contentDescription = null,
+            tint = if (showCompareCard) Color.Black else StudioCyan,
+            modifier = Modifier.size(18.dp)
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = if (showCompareCard) "Hide A/B Prompt Diff" else "Compare Two Takes (A/B Diff)",
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+            color = if (showCompareCard) Color.Black else StudioCyan
+          )
+        }
+      }
+    }
+  }
+
+  val filterChipsBlock: @Composable () -> Unit = {
+    val filterOptions = listOf("ALL", "WINNER", "PENDING", "MISS")
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      filterOptions.forEach { opt ->
+        val isSelected = opt == filterResult
+        Surface(
+          color = if (isSelected) AmberGold else StudioCardElevated,
+          shape = RoundedCornerShape(14.dp),
+          modifier = Modifier
+            .weight(1f)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .semantics {
+              role = Role.Button
+              selected = isSelected
+              contentDescription = "Filter takes by $opt"
+            }
+            .clickable { viewModel.setTakeFilterResult(opt) }
+            .border(0.5.dp, StudioBorder, RoundedCornerShape(14.dp))
+            .testTag("filter_take_$opt")
+        ) {
+          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(vertical = 10.dp)) {
+            Text(
+              text = opt,
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+              color = if (isSelected) Color.Black else TextPrimary
+            )
           }
         }
       }
     }
+  }
 
-    // Take Items List
-    items(filteredTakes, key = { it.id }) { take ->
-      TakeItemCard(
-        take = take,
-        isSelectedAsA = takeA?.id == take.id && showCompareCard,
-        isSelectedAsB = takeB?.id == take.id && showCompareCard,
-        canCompare = takesList.size >= 2,
-        onSelectAsA = {
-          compareTakeAId = take.id
-          if (compareTakeBId == take.id) {
-            compareTakeBId = takesList.firstOrNull { it.id != take.id }?.id
-          }
-          showCompareCard = true
-        },
-        onSelectAsB = {
-          compareTakeBId = take.id
-          if (compareTakeAId == take.id) {
-            compareTakeAId = takesList.firstOrNull { it.id != take.id }?.id
-          }
-          showCompareCard = true
-        },
-        onLoadIntoBuild = { viewModel.loadTakeIntoBuild(take, context) },
-        onUpdateResult = { res -> viewModel.updateTakeResult(take.id, res) },
-        onUpdateNextChange = { txt -> viewModel.updateTakeNextChange(take.id, txt) },
-        onDuplicate = { viewModel.duplicateTake(take.id) },
-        onDelete = { viewModel.deleteTake(take.id) },
-        onCopy = {
-          val bundle = """=== TAKE: ${take.name.uppercase()} ===
+  val emptyTakesBlock: @Composable () -> Unit = {
+    Surface(
+      color = StudioCard,
+      shape = RoundedCornerShape(12.dp),
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(vertical = 20.dp)
+    ) {
+      Column(
+        modifier = Modifier.padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+      ) {
+        Icon(Icons.Default.Bookmarks, contentDescription = null, tint = TextMuted, modifier = Modifier.size(36.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+        Text("No takes logged yet", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+        Text("Build a prompt package in the Build tab and tap 'Save Take' to log it here.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+      }
+    }
+  }
+
+  val renderTakeCard: @Composable (TakeEntity) -> Unit = { take ->
+    TakeItemCard(
+      take = take,
+      isSelectedAsA = takeA?.id == take.id && showCompareCard,
+      isSelectedAsB = takeB?.id == take.id && showCompareCard,
+      canCompare = takesList.size >= 2,
+      onSelectAsA = {
+        compareTakeAId = take.id
+        if (compareTakeBId == take.id) {
+          compareTakeBId = takesList.firstOrNull { it.id != take.id }?.id
+        }
+        showCompareCard = true
+      },
+      onSelectAsB = {
+        compareTakeBId = take.id
+        if (compareTakeAId == take.id) {
+          compareTakeAId = takesList.firstOrNull { it.id != take.id }?.id
+        }
+        showCompareCard = true
+      },
+      onLoadIntoBuild = { viewModel.loadTakeIntoBuild(take, context) },
+      onUpdateResult = { res -> viewModel.updateTakeResult(take.id, res) },
+      onUpdateNextChange = { txt -> viewModel.updateTakeNextChange(take.id, txt) },
+      onDuplicate = { viewModel.duplicateTake(take.id) },
+      onDelete = { viewModel.deleteTake(take.id) },
+      onCopy = {
+        val bundle = """=== TAKE: ${take.name.uppercase()} ===
 Beat: ${if (take.beatTitle.isNotBlank()) take.beatTitle else take.name}
 Lane: ${take.lane} | Job: ${take.jobType.uppercase()} | BPM: ${if (take.bpm > 0) take.bpm.toInt().toString() else "N/A"}
 Status: ${take.result.uppercase()} | Settings: ${take.settings}
@@ -323,10 +282,136 @@ ${take.excludeText}
 --- LYRICS BOX MAP ---
 ${take.lyrics}
 =================================""".trimIndent()
-          viewModel.copyToClipboard(context, "Take ${take.name}", bundle)
+        viewModel.copyToClipboard(context, "Take ${take.name}", bundle)
+      }
+    )
+  }
+
+  BoxWithConstraints(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(StudioBg)
+  ) {
+    val isWideLayout = maxWidth >= 760.dp
+
+    if (isWideLayout) {
+      Row(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(horizontal = 16.dp)
+          .testTag("takes_wide_layout"),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+      ) {
+        LazyColumn(
+          modifier = Modifier
+            .weight(0.95f)
+            .fillMaxHeight(),
+          contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+          item { headerAndAnalyticsBlock() }
+          item { exportImportCompareBlock() }
+          if (comparison != null) {
+            item {
+              TakeABDiffCard(
+                comparison = comparison,
+                onLoadTakeToBuild = { take -> viewModel.loadTakeIntoBuild(take, context) }
+              )
+            }
+          }
+          item { filterChipsBlock() }
         }
-      )
+
+        LazyColumn(
+          modifier = Modifier
+            .weight(1.05f)
+            .fillMaxHeight()
+            .testTag("takes_list"),
+          contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+          if (filteredTakes.isEmpty()) {
+            item { emptyTakesBlock() }
+          } else {
+            items(filteredTakes, key = { it.id }) { take ->
+              renderTakeCard(take)
+            }
+          }
+        }
+      }
+    } else {
+      LazyColumn(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(horizontal = 14.dp)
+          .testTag("takes_list"),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+      ) {
+        item { headerAndAnalyticsBlock() }
+        item { exportImportCompareBlock() }
+        if (comparison != null) {
+          item {
+            TakeABDiffCard(
+              comparison = comparison,
+              onLoadTakeToBuild = { take -> viewModel.loadTakeIntoBuild(take, context) }
+            )
+          }
+        }
+        item { filterChipsBlock() }
+        if (filteredTakes.isEmpty()) {
+          item { emptyTakesBlock() }
+        } else {
+          items(filteredTakes, key = { it.id }) { take ->
+            renderTakeCard(take)
+          }
+        }
+      }
     }
+  }
+
+  if (showImportModal) {
+    AlertDialog(
+      onDismissRequest = { showImportModal = false },
+      title = { Text("Import Takes to Logbook", color = TextPrimary) },
+      text = {
+        Column {
+          Text("Paste JSON takes backup below. Existing takes are safely preserved (merge-only import):", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+          Spacer(modifier = Modifier.height(8.dp))
+          OutlinedTextField(
+            value = importJsonInput,
+            onValueChange = { importJsonInput = it },
+            placeholder = { Text("Paste JSON array or envelope here...") },
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+            textStyle = MonospacePrompt.copy(fontSize = 11.sp, color = TextPrimary)
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            if (importJsonInput.isNotBlank()) {
+              viewModel.importTakes(context, importJsonInput)
+              importJsonInput = ""
+            }
+            showImportModal = false
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = StudioCyan),
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+        ) {
+          Text("Import", color = Color.Black)
+        }
+      },
+      dismissButton = {
+        TextButton(
+          onClick = { showImportModal = false },
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+        ) {
+          Text("Cancel", color = TextSecondary)
+        }
+      },
+      containerColor = StudioCardElevated
+    )
   }
 }
 
@@ -562,7 +647,8 @@ private fun TakeABDiffCard(
           shape = RoundedCornerShape(8.dp),
           modifier = Modifier
             .weight(1f)
-            .defaultMinSize(minHeight = 48.dp)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics { contentDescription = "Load Take A into Build" }
             .testTag("action_load_diff_a")
         ) {
           Text("Load A to Build", style = MaterialTheme.typography.labelSmall, color = AmberGold)
@@ -573,7 +659,8 @@ private fun TakeABDiffCard(
           shape = RoundedCornerShape(8.dp),
           modifier = Modifier
             .weight(1f)
-            .defaultMinSize(minHeight = 48.dp)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics { contentDescription = "Load Take B into Build" }
             .testTag("action_load_diff_b")
         ) {
           Text("Load B to Build", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = Color.Black)
@@ -645,13 +732,28 @@ private fun TakeItemCard(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-          ResultPill(label = "WIN", active = take.result.equals("winner", true), activeColor = StudioWinner) {
+          ResultPill(
+            label = "WIN",
+            active = take.result.equals("winner", true),
+            activeColor = StudioWinner,
+            accessibilityLabel = "Mark take ${take.name} as winner"
+          ) {
             onUpdateResult("winner")
           }
-          ResultPill(label = "MISS", active = take.result.equals("miss", true), activeColor = StudioMiss) {
+          ResultPill(
+            label = "MISS",
+            active = take.result.equals("miss", true),
+            activeColor = StudioMiss,
+            accessibilityLabel = "Mark take ${take.name} as miss"
+          ) {
             onUpdateResult("miss")
           }
-          ResultPill(label = "PEND", active = take.result.equals("pending", true), activeColor = StudioPending) {
+          ResultPill(
+            label = "PEND",
+            active = take.result.equals("pending", true),
+            activeColor = StudioPending,
+            accessibilityLabel = "Mark take ${take.name} as pending"
+          ) {
             onUpdateResult("pending")
           }
         }
@@ -690,7 +792,7 @@ private fun TakeItemCard(
               onUpdateNextChange(noteInput)
               editingNote = false
             },
-            modifier = Modifier.minimumInteractiveComponentSize()
+            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
           ) {
             Icon(Icons.Default.Check, contentDescription = "Save Note", tint = StudioWinner)
           }
@@ -699,17 +801,23 @@ private fun TakeItemCard(
         Row(
           modifier = Modifier
             .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(6.dp))
+            .semantics {
+              role = Role.Button
+              contentDescription = "Edit next-change note for ${take.name}"
+            }
             .clickable { editingNote = true }
             .background(StudioCardElevated)
-            .padding(8.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
           Text(
             text = if (take.nextChange.isBlank()) "Tap to add next-change note..." else "Next change: ${take.nextChange}",
             style = MaterialTheme.typography.labelSmall,
-            color = if (take.nextChange.isBlank()) TextMuted else AmberGoldLight
+            color = if (take.nextChange.isBlank()) TextMuted else AmberGoldLight,
+            modifier = Modifier.weight(1f)
           )
           Icon(Icons.Default.Edit, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
         }
@@ -729,6 +837,7 @@ private fun TakeItemCard(
               active = isSelectedAsA,
               activeColor = AmberGold,
               tag = "action_set_compare_a_${take.id}",
+              accessibilityLabel = "Select ${take.name} as Compare A",
               onClick = onSelectAsA
             )
             ResultPill(
@@ -736,25 +845,26 @@ private fun TakeItemCard(
               active = isSelectedAsB,
               activeColor = StudioCyan,
               tag = "action_set_compare_b_${take.id}",
+              accessibilityLabel = "Select ${take.name} as Compare B",
               onClick = onSelectAsB
             )
           }
           TextButton(
             onClick = onLoadIntoBuild,
-            modifier = Modifier.minimumInteractiveComponentSize()
+            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
           ) {
             Text("Load", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = AmberGold)
           }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-          IconButton(onClick = onDuplicate, modifier = Modifier.minimumInteractiveComponentSize()) {
+          IconButton(onClick = onDuplicate, modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)) {
             Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate take ${take.name}", tint = StudioCyan, modifier = Modifier.size(18.dp))
           }
-          IconButton(onClick = onCopy, modifier = Modifier.minimumInteractiveComponentSize()) {
+          IconButton(onClick = onCopy, modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)) {
             Icon(Icons.Default.Share, contentDescription = "Copy take ${take.name}", tint = TextSecondary, modifier = Modifier.size(18.dp))
           }
-          IconButton(onClick = onDelete, modifier = Modifier.minimumInteractiveComponentSize()) {
+          IconButton(onClick = onDelete, modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)) {
             Icon(Icons.Default.DeleteOutline, contentDescription = "Delete take ${take.name}", tint = StudioMiss, modifier = Modifier.size(18.dp))
           }
         }
@@ -769,22 +879,32 @@ private fun ResultPill(
   active: Boolean,
   activeColor: Color,
   tag: String? = null,
+  accessibilityLabel: String = label,
   onClick: () -> Unit
 ) {
   Surface(
     color = if (active) activeColor else StudioCardElevated,
-    shape = RoundedCornerShape(4.dp),
+    shape = RoundedCornerShape(6.dp),
     modifier = Modifier
-      .minimumInteractiveComponentSize()
-      .clip(RoundedCornerShape(4.dp))
+      .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+      .clip(RoundedCornerShape(6.dp))
+      .semantics {
+        role = Role.Button
+        selected = active
+        contentDescription = accessibilityLabel
+      }
       .clickable { onClick() }
       .then(if (tag != null) Modifier.testTag(tag) else Modifier)
   ) {
-    Text(
-      text = label,
-      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
-      color = if (active) Color.Black else TextMuted,
-      modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-    )
+    Box(
+      contentAlignment = Alignment.Center,
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+      Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+        color = if (active) Color.Black else TextMuted
+      )
+    }
   }
 }

@@ -34,7 +34,43 @@ data class ComplianceSnapshot(
   val styleInfluence: Int,
   val audioInfluence: Int,
   val fixSummary: String = ""
-)
+) {
+  fun toJson(): String {
+    return org.json.JSONObject().apply {
+      put("jobType", jobType.value)
+      put("stylePrompt", stylePrompt)
+      put("lyricsMap", lyricsMap)
+      put("excludeText", excludeText)
+      put("variety", variety)
+      put("weirdness", weirdness)
+      put("styleInfluence", styleInfluence)
+      put("audioInfluence", audioInfluence)
+      put("fixSummary", fixSummary)
+    }.toString()
+  }
+
+  companion object {
+    fun fromJson(raw: String?): ComplianceSnapshot? {
+      if (raw.isNullOrBlank()) return null
+      return try {
+        val obj = org.json.JSONObject(raw)
+        ComplianceSnapshot(
+          jobType = JobType.fromString(obj.optString("jobType", "preserve")),
+          stylePrompt = obj.optString("stylePrompt", "").take(STYLE_LIMIT),
+          lyricsMap = obj.optString("lyricsMap", "").take(LYRICS_LIMIT),
+          excludeText = obj.optString("excludeText", "").take(EXCLUDE_LIMIT),
+          variety = obj.optInt("variety", 0).coerceIn(0, 100),
+          weirdness = obj.optInt("weirdness", 25).coerceIn(0, 100),
+          styleInfluence = obj.optInt("styleInfluence", 70).coerceIn(0, 100),
+          audioInfluence = obj.optInt("audioInfluence", 80).coerceIn(0, 100),
+          fixSummary = obj.optString("fixSummary", "").take(160)
+        )
+      } catch (_: Exception) {
+        null
+      }
+    }
+  }
+}
 
 /**
  * Pure domain auditor and auto-repair engine for Suno v6 production rules.
@@ -45,6 +81,8 @@ object SunoComplianceAuditor {
     """\b(?:no\s+(?:vocals?|singing|drums?|808s?|bass|rap|melody|instruments?|hi-?hats?|snare|kicks?)|without\s+(?:vocals?|singing|drums?|bass|808s?)|exclude\s+[a-z0-9\s-]+|remove\s+(?:vocals?|drums?|bass|808s?))\b""",
     RegexOption.IGNORE_CASE
   )
+
+  private val trailingEndRegex = Regex("""(?:\r?\n|\s)*\[End\]\s*$""", RegexOption.IGNORE_CASE)
 
   private val fallbackNegativeKeywords = listOf("no vocals", "no drums", "exclude", "without", "remove")
 
@@ -150,10 +188,14 @@ object SunoComplianceAuditor {
         if (snapshot.jobType != JobType.PRESERVE || snapshot.stylePrompt.contains(LOCK_LINE)) {
           snapshot
         } else {
-          val updated = if (snapshot.stylePrompt.isBlank()) {
-            "$LOCK_LINE. Add $activeLane drums underneath only."
+          val rawBody = snapshot.stylePrompt.trimStart()
+          val prefix = "$LOCK_LINE. "
+          val updated = if (rawBody.isBlank()) {
+            "${prefix}Add $activeLane drums underneath only."
           } else {
-            "$LOCK_LINE. ${snapshot.stylePrompt.trimStart()}"
+            val remainingBudget = (STYLE_LIMIT - prefix.length).coerceAtLeast(0)
+            val fittedBody = trimAtWordBoundary(rawBody, remainingBudget)
+            if (fittedBody.isEmpty()) LOCK_LINE else "$prefix$fittedBody"
           }
           snapshot.copy(
             stylePrompt = updated,
@@ -167,7 +209,12 @@ object SunoComplianceAuditor {
         val updated = when {
           trimmed.isBlank() -> "[Instrumental]\n[Intro] (sample solo)\n[Verse 1]\n[Chorus 1]\n[End]"
           trimmed.endsWith("[End]") -> snapshot.lyricsMap
-          else -> "$trimmed\n[End]"
+          else -> {
+            val suffix = "\n[End]"
+            val bodyMax = (LYRICS_LIMIT - suffix.length).coerceAtLeast(0)
+            val body = trimAtWordBoundary(trimmed, bodyMax)
+            "$body$suffix"
+          }
         }
         snapshot.copy(
           lyricsMap = updated,
@@ -210,7 +257,7 @@ object SunoComplianceAuditor {
 
         snapshot.copy(
           stylePrompt = cleanedStyle,
-          excludeText = existingExcludes.joinToString(", "),
+          excludeText = trimAtWordBoundary(existingExcludes.joinToString(", "), EXCLUDE_LIMIT),
           fixSummary = "Moved ${extracted.size} negative directive(s) to Exclude"
         )
       }
@@ -226,14 +273,28 @@ object SunoComplianceAuditor {
       }
 
       ComplianceRuleId.CHARACTER_CAPS -> {
-        val fixedStyle = trimAtWordBoundary(snapshot.stylePrompt, STYLE_LIMIT)
+        val fixedStyle = if (snapshot.stylePrompt.length <= STYLE_LIMIT) {
+          snapshot.stylePrompt
+        } else if (snapshot.jobType == JobType.PRESERVE && snapshot.stylePrompt.contains(LOCK_LINE)) {
+          val withoutLock = snapshot.stylePrompt
+            .replace("$LOCK_LINE. ", "")
+            .replace(LOCK_LINE, "")
+            .trimStart(',', '.', ' ')
+          val prefix = "$LOCK_LINE. "
+          val bodyBudget = (STYLE_LIMIT - prefix.length).coerceAtLeast(0)
+          val fittedBody = trimAtWordBoundary(withoutLock, bodyBudget)
+          if (fittedBody.isEmpty()) LOCK_LINE else "$prefix$fittedBody"
+        } else {
+          trimAtWordBoundary(snapshot.stylePrompt, STYLE_LIMIT)
+        }
         val fixedExclude = trimAtWordBoundary(snapshot.excludeText, EXCLUDE_LIMIT)
         val fixedLyrics = if (snapshot.lyricsMap.length <= LYRICS_LIMIT) {
           snapshot.lyricsMap
         } else {
           val endSuffix = "\n[End]"
           val bodyMax = (LYRICS_LIMIT - endSuffix.length).coerceAtLeast(0)
-          trimAtWordBoundary(snapshot.lyricsMap, bodyMax) + endSuffix
+          val strippedBody = snapshot.lyricsMap.replace(trailingEndRegex, "").trimEnd()
+          trimAtWordBoundary(strippedBody, bodyMax) + endSuffix
         }
         snapshot.copy(
           stylePrompt = fixedStyle,
@@ -273,6 +334,7 @@ object SunoComplianceAuditor {
   }
 
   private fun trimAtWordBoundary(text: String, maxChars: Int): String {
+    if (maxChars <= 0) return ""
     if (text.length <= maxChars) return text
     val cut = text.substring(0, maxChars)
     val lastSpace = cut.lastIndexOf(' ')

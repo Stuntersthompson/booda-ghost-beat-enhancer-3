@@ -631,4 +631,105 @@ class ExampleUnitTest {
     assertTrue(allFixed.stylePrompt.length <= com.example.data.model.STYLE_LIMIT)
     assertTrue(allFixed.excludeText.length <= com.example.data.model.EXCLUDE_LIMIT)
   }
+
+  @Test
+  fun test_suno_compliance_auditor_overlong_preserve_and_end_closure_edge_cases() {
+    // 1. Overlong lyrics ALREADY ending in [End] -> CHARACTER_CAPS must preserve [End] cleanly without truncating it
+    val overlongWithEnd = "[Intro]\n" + "line ".repeat(1100) + "\n[End]"
+    val overlongStyleWithLockLater = "Dark gritty beat, " + "texture ".repeat(140) + " $LOCK_LINE"
+    val overlongSnap = ComplianceSnapshot(
+      jobType = JobType.PRESERVE,
+      stylePrompt = overlongStyleWithLockLater,
+      lyricsMap = overlongWithEnd,
+      excludeText = "mud, " + "clipping ".repeat(150),
+      variety = 0,
+      weirdness = 25,
+      styleInfluence = 70,
+      audioInfluence = 80
+    )
+
+    val capsFixed = SunoComplianceAuditor.autoFixRule(ComplianceRuleId.CHARACTER_CAPS, overlongSnap, "Trap")
+    assertTrue(capsFixed.stylePrompt.length <= com.example.data.model.STYLE_LIMIT)
+    assertTrue("LOCK_LINE must remain preserved after CHARACTER_CAPS trim", capsFixed.stylePrompt.contains(LOCK_LINE))
+    assertTrue(capsFixed.lyricsMap.length <= com.example.data.model.LYRICS_LIMIT)
+    assertTrue("Lyrics must still end cleanly with [End]", capsFixed.lyricsMap.trim().endsWith("[End]"))
+    assertFalse("Must not produce malformed partial tag like [E", capsFixed.lyricsMap.contains("[E\n[End]"))
+    assertTrue(capsFixed.excludeText.length <= com.example.data.model.EXCLUDE_LIMIT)
+
+    // 2. Empty and whitespace inputs should audit and auto-fix without throwing
+    val emptySnap = ComplianceSnapshot(
+      jobType = JobType.PRESERVE,
+      stylePrompt = "   ",
+      lyricsMap = "",
+      excludeText = "   ",
+      variety = 50,
+      weirdness = 25,
+      styleInfluence = 70,
+      audioInfluence = 10
+    )
+    val fixedEmpty = SunoComplianceAuditor.autoFixAll(emptySnap, "Boom bap")
+    val emptyPost = SunoComplianceAuditor.audit(
+      jobType = fixedEmpty.jobType,
+      stylePrompt = fixedEmpty.stylePrompt,
+      lyricsMap = fixedEmpty.lyricsMap,
+      excludeText = fixedEmpty.excludeText,
+      variety = fixedEmpty.variety,
+      audioInfluence = fixedEmpty.audioInfluence
+    )
+    assertTrue(emptyPost.allPassed)
+    assertTrue(fixedEmpty.stylePrompt.startsWith(LOCK_LINE))
+    assertTrue(fixedEmpty.lyricsMap.endsWith("[End]"))
+  }
+
+  @Test
+  fun test_gemini_uri_validator_accepts_https_http_and_rejects_unsafe() {
+    assertTrue(com.example.ai.GeminiBeatService.isSafeHttpUri("https://suno.com/docs"))
+    assertTrue(com.example.ai.GeminiBeatService.isSafeHttpUri("http://example.com/path?q=1"))
+    assertTrue(com.example.ai.GeminiBeatService.isSafeHttpUri("  https://example.org/guide  "))
+
+    assertFalse(com.example.ai.GeminiBeatService.isSafeHttpUri(""))
+    assertFalse(com.example.ai.GeminiBeatService.isSafeHttpUri("   "))
+    assertFalse(com.example.ai.GeminiBeatService.isSafeHttpUri("javascript:alert(1)"))
+    assertFalse(com.example.ai.GeminiBeatService.isSafeHttpUri("file:///etc/passwd"))
+    assertFalse(com.example.ai.GeminiBeatService.isSafeHttpUri("content://com.example/provider"))
+    assertFalse(com.example.ai.GeminiBeatService.isSafeHttpUri("https://"))
+    assertFalse(com.example.ai.GeminiBeatService.isSafeHttpUri("http://"))
+    assertFalse(com.example.ai.GeminiBeatService.isSafeHttpUri("https://example.com/has space"))
+  }
+
+  @Test
+  fun test_compliance_snapshot_json_roundtrip_and_malformed_handling() {
+    val original = ComplianceSnapshot(
+      jobType = JobType.PRESERVE,
+      stylePrompt = "$LOCK_LINE. Add Trap drums.",
+      lyricsMap = "[Intro]\n[End]",
+      excludeText = "no vocals",
+      variety = 0,
+      weirdness = 25,
+      styleInfluence = 70,
+      audioInfluence = 82,
+      fixSummary = "Calibrated sliders"
+    )
+
+    val parsed = ComplianceSnapshot.fromJson(original.toJson())
+    assertNotNull(parsed)
+    assertEquals(original, parsed)
+
+    // Out-of-range numeric fields in malformed JSON should clamp safely
+    val clampedJson = """
+      {"jobType":"create","stylePrompt":"Trap beat","lyricsMap":"[End]","excludeText":"","variety":999,"weirdness":-10,"styleInfluence":150,"audioInfluence":-4}
+    """.trimIndent()
+    val clamped = ComplianceSnapshot.fromJson(clampedJson)
+    assertNotNull(clamped)
+    assertEquals(JobType.CREATE, clamped!!.jobType)
+    assertEquals(100, clamped.variety)
+    assertEquals(0, clamped.weirdness)
+    assertEquals(100, clamped.styleInfluence)
+    assertEquals(0, clamped.audioInfluence)
+
+    // Garbage / null inputs return null cleanly
+    assertNull(ComplianceSnapshot.fromJson(null))
+    assertNull(ComplianceSnapshot.fromJson(""))
+    assertNull(ComplianceSnapshot.fromJson("not-json"))
+  }
 }

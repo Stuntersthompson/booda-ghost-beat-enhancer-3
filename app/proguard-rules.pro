@@ -1,21 +1,31 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# ProGuard / R8 rules for BooDa Beat Enhancer
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Keep source file and line numbers for clear crash stack traces
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
+-keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# App entrypoints and Room database classes
+-keep class com.example.MainActivity { *; }
+-keep class com.example.data.db.** { *; }
+-keepclassmembers class * extends androidx.room.RoomDatabase {
+    public abstract ** *(...);
+}
+-keep class * extends androidx.room.RoomDatabase
+-dontwarn androidx.room.paging.**
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Models & audio DSP state
+-keep class com.example.data.model.** { *; }
+-keep class com.example.audio.AudioAnalysisResult { *; }
+
+# Firebase & App Check
+-keepattributes *Annotation*
+-keepclassmembers class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.appcheck.debug.**
+-dontwarn org.slf4j.**
+-dontwarn javax.annotation.**
+
+# Kotlin Coroutines
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
+-dontwarn kotlinx.coroutines.flow.**

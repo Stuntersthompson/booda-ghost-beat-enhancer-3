@@ -1,8 +1,18 @@
 package com.example.data.repository
 
 import com.example.data.db.TakeDao
+import com.example.data.model.EXCLUDE_LIMIT
+import com.example.data.model.JobType
+import com.example.data.model.LYRICS_LIMIT
+import com.example.data.model.STYLE_LIMIT
 import com.example.data.model.TakeEntity
 import kotlinx.coroutines.flow.Flow
+
+data class ImportBatchResult(
+  val importedCount: Int,
+  val skippedCount: Int,
+  val errorMessage: String? = null
+)
 
 class TakeRepository(private val takeDao: TakeDao) {
   val allTakes: Flow<List<TakeEntity>> = takeDao.getAllTakes()
@@ -126,44 +136,78 @@ class TakeRepository(private val takeDao: TakeDao) {
   }
 
   suspend fun importTakesJson(jsonStr: String): Int {
+    return importTakesDetailed(jsonStr).importedCount
+  }
+
+  suspend fun importTakesDetailed(jsonStr: String): ImportBatchResult {
+    val trimmed = jsonStr.trim()
+    if (trimmed.isEmpty()) {
+      return ImportBatchResult(0, 0, "Empty JSON input.")
+    }
     var count = 0
-    try {
-      val trimmed = jsonStr.trim()
-      val jsonArray = if (trimmed.startsWith("{")) {
-        val env = org.json.JSONObject(trimmed)
-        env.optJSONArray("takes") ?: org.json.JSONArray()
-      } else if (trimmed.startsWith("[")) {
-        org.json.JSONArray(trimmed)
-      } else {
-        return 0
+    var skipped = 0
+    return try {
+      val jsonArray = when {
+        trimmed.startsWith("{") -> {
+          val env = org.json.JSONObject(trimmed)
+          env.optJSONArray("takes") ?: org.json.JSONArray()
+        }
+        trimmed.startsWith("[") -> org.json.JSONArray(trimmed)
+        else -> return ImportBatchResult(0, 0, "Invalid JSON format.")
       }
 
-      for (i in 0 until jsonArray.length()) {
-        val item = jsonArray.getJSONObject(i)
-        val entity = TakeEntity(
-          id = 0, // Auto-generate fresh ID on import
-          name = item.optString("name", "Imported Take"),
-          beatTitle = item.optString("beatTitle", ""),
-          lane = item.optString("lane", "Trap"),
-          bpm = item.optDouble("bpm", 0.0),
-          audioFilePath = item.optString("audioFilePath", "").ifEmpty { null },
-          style = item.optString("style", ""),
-          lyrics = item.optString("lyrics", ""),
-          excludeText = item.optString("excludeText", item.optString("exclude", "")),
-          settings = item.optString("settings", ""),
-          result = item.optString("result", "pending"),
-          nextChange = item.optString("nextChange", ""),
-          jobType = item.optString("jobType", "preserve"),
-          createdAt = item.optLong("createdAt", System.currentTimeMillis())
-        )
-        if (entity.style.isNotBlank()) {
-          takeDao.insertTake(entity)
-          count++
+      val limit = minOf(jsonArray.length(), 250)
+      for (i in 0 until limit) {
+        val item = jsonArray.optJSONObject(i)
+        if (item == null) {
+          skipped++
+          continue
         }
+        val styleText = item.optString("style", "").trim().take(STYLE_LIMIT)
+        if (styleText.isBlank()) {
+          skipped++
+          continue
+        }
+
+        val rawBpm = item.optDouble("bpm", 0.0)
+        val safeBpm = if (rawBpm.isNaN() || rawBpm.isInfinite() || rawBpm < 0.0) 0.0 else rawBpm.coerceAtMost(300.0)
+
+        val rawResult = item.optString("result", "pending").trim().lowercase()
+        val normalizedResult = when (rawResult) {
+          "winner", "miss", "pending" -> rawResult
+          else -> "pending"
+        }
+
+        val normalizedJob = JobType.fromString(item.optString("jobType", "preserve")).value
+        val rawCreatedAt = item.optLong("createdAt", System.currentTimeMillis())
+
+        val entity = TakeEntity(
+          id = 0,
+          name = item.optString("name", "Imported Take").trim().take(120).ifBlank { "Imported Take" },
+          beatTitle = item.optString("beatTitle", "").trim().take(120),
+          lane = item.optString("lane", "Trap").trim().take(80).ifBlank { "Trap" },
+          bpm = safeBpm,
+          audioFilePath = item.optString("audioFilePath", "").trim().take(260).ifEmpty { null },
+          style = styleText,
+          lyrics = item.optString("lyrics", "").take(LYRICS_LIMIT),
+          excludeText = item.optString("excludeText", item.optString("exclude", "")).take(EXCLUDE_LIMIT),
+          settings = item.optString("settings", "").take(400),
+          result = normalizedResult,
+          nextChange = item.optString("nextChange", "").take(400),
+          jobType = normalizedJob,
+          createdAt = if (rawCreatedAt > 0L) rawCreatedAt else System.currentTimeMillis()
+        )
+        takeDao.insertTake(entity)
+        count++
       }
+      ImportBatchResult(
+        importedCount = count,
+        skippedCount = skipped,
+        errorMessage = if (count == 0) "No valid takes with a Style prompt found." else null
+      )
     } catch (e: Exception) {
       e.printStackTrace()
+      ImportBatchResult(count, skipped, "Malformed JSON: ${e.localizedMessage ?: "parse failed"}")
     }
-    return count
   }
 }

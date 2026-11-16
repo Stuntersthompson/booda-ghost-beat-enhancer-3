@@ -13,41 +13,52 @@ import kotlin.math.max
 import kotlin.math.sqrt
 
 class AudioRecorder {
+  private val recordLock = Any()
   private var audioRecord: AudioRecord? = null
-  private var isRecording = false
+  @Volatile private var isRecording = false
   private val sampleRate = 44100
   private val channelConfig = AudioFormat.CHANNEL_IN_MONO
   private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
 
   @SuppressLint("MissingPermission")
-  fun startRecording(onAmplitudeUpdate: (Float, Float) -> Unit = { _, _ -> }): Boolean {
-    val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-    if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
-      return false
-    }
-
-    val bufferSize = max(minBufferSize, sampleRate * 2)
-    return try {
-      audioRecord = AudioRecord(
-        MediaRecorder.AudioSource.MIC,
-        sampleRate,
-        channelConfig,
-        audioFormat,
-        bufferSize
-      )
-
-      if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-        audioRecord?.release()
+  fun startRecording(@Suppress("UNUSED_PARAMETER") onAmplitudeUpdate: (Float, Float) -> Unit = { _, _ -> }): Boolean {
+    synchronized(recordLock) {
+      if (isRecording) return true
+      audioRecord?.let { stale ->
+        try { stale.release() } catch (_: Exception) {}
         audioRecord = null
+      }
+
+      val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+      if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
         return false
       }
 
-      audioRecord?.startRecording()
-      isRecording = true
-      true
-    } catch (e: Exception) {
-      e.printStackTrace()
-      false
+      val bufferSize = max(minBufferSize, sampleRate * 2)
+      return try {
+        val recorder = AudioRecord(
+          MediaRecorder.AudioSource.MIC,
+          sampleRate,
+          channelConfig,
+          audioFormat,
+          bufferSize
+        )
+
+        if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+          recorder.release()
+          return false
+        }
+
+        recorder.startRecording()
+        audioRecord = recorder
+        isRecording = true
+        true
+      } catch (e: Exception) {
+        e.printStackTrace()
+        audioRecord = null
+        isRecording = false
+        false
+      }
     }
   }
 
@@ -62,7 +73,12 @@ class AudioRecorder {
 
     try {
       while (isRecording && totalSamplesRead < maxSamples) {
-        val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+        val activeRecord = synchronized(recordLock) { audioRecord } ?: break
+        val read = try {
+          activeRecord.read(buffer, 0, buffer.size)
+        } catch (_: Exception) {
+          -1
+        }
         if (read > 0) {
           var sumSquares = 0.0
           var peak = 0.0f
@@ -80,7 +96,6 @@ class AudioRecorder {
           val rms = sqrt(sumSquares / read).toFloat()
           val db = if (rms > 0.00001f) (20 * log10(rms.toDouble())).toFloat() else -80f
 
-          // Extract 8 amplitude subdivisions for real-time waveform visualization
           val subBlocks = 8
           val subBlockSize = read / subBlocks
           val blockPeaks = FloatArray(subBlocks)
@@ -105,7 +120,6 @@ class AudioRecorder {
       stopRecording()
     }
 
-    // Convert raw PCM bytes to normalized float array
     val pcmBytes = outputStream.toByteArray()
     val floatArray = FloatArray(pcmBytes.size / 2)
     for (i in floatArray.indices) {
@@ -118,14 +132,22 @@ class AudioRecorder {
   }
 
   fun stopRecording() {
-    isRecording = false
-    try {
-      audioRecord?.stop()
-      audioRecord?.release()
-    } catch (e: Exception) {
-      e.printStackTrace()
-    } finally {
+    synchronized(recordLock) {
+      isRecording = false
+      val rec = audioRecord
       audioRecord = null
+      if (rec != null) {
+        try {
+          if (rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+            rec.stop()
+          }
+        } catch (_: Exception) {
+        }
+        try {
+          rec.release()
+        } catch (_: Exception) {
+        }
+      }
     }
   }
 

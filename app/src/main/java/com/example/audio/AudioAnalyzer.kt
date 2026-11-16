@@ -700,6 +700,7 @@ class AudioAnalyzer(private val context: Context) {
    * downmixing interleaved multi-channel PCM cleanly into mono Floats.
    */
   private fun decodeAudioUri(uri: Uri): DecodedAudio {
+    if (uri == Uri.EMPTY) return DecodedAudio(FloatArray(0), 44100)
     val extractor = MediaExtractor()
     var codec: MediaCodec? = null
     return try {
@@ -722,7 +723,7 @@ class AudioAnalyzer(private val context: Context) {
 
       val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
       var decodedSampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-        format.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(8000)
+        format.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceIn(8000, 192000)
       } else 44100
       var channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
         format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceIn(1, 8)
@@ -737,12 +738,15 @@ class AudioAnalyzer(private val context: Context) {
       val info = MediaCodec.BufferInfo()
       var isInputEOS = false
       var isOutputEOS = false
+      var idleIterations = 0
       val timeoutUs = 5000L
 
-      while (!isOutputEOS && outputFloats.size < maxMonoSamples) {
+      while (!isOutputEOS && outputFloats.size < maxMonoSamples && idleIterations < 400) {
+        var madeProgress = false
         if (!isInputEOS) {
           val inIndex = activeCodec.dequeueInputBuffer(timeoutUs)
           if (inIndex >= 0) {
+            madeProgress = true
             val buffer = activeCodec.getInputBuffer(inIndex)
             val sampleSize = if (buffer != null) extractor.readSampleData(buffer, 0) else -1
             if (sampleSize < 0) {
@@ -758,15 +762,17 @@ class AudioAnalyzer(private val context: Context) {
         val outIndex = activeCodec.dequeueOutputBuffer(info, timeoutUs)
         when {
           outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+            madeProgress = true
             val outFmt = activeCodec.outputFormat
             if (outFmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
-              decodedSampleRate = outFmt.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(8000)
+              decodedSampleRate = outFmt.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceIn(8000, 192000)
             }
             if (outFmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
               channelCount = outFmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceIn(1, 8)
             }
           }
           outIndex >= 0 -> {
+            madeProgress = true
             val outBuffer = activeCodec.getOutputBuffer(outIndex)
             if (outBuffer != null && info.size > 0) {
               outBuffer.position(info.offset)
@@ -786,6 +792,12 @@ class AudioAnalyzer(private val context: Context) {
               isOutputEOS = true
             }
           }
+        }
+
+        if (madeProgress) {
+          idleIterations = 0
+        } else {
+          idleIterations++
         }
       }
 

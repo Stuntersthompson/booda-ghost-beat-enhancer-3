@@ -360,43 +360,40 @@ fun RealtimeWaveformVisualizer(
           IconButton(
             onClick = { visualizerStyle = WaveformStyle.MIRRORED_GLOW },
             modifier = Modifier
-              .minimumInteractiveComponentSize()
-              .size(34.dp)
+              .size(48.dp)
               .testTag("style_mirrored_glow")
           ) {
             Icon(
               imageVector = Icons.Default.Equalizer,
               contentDescription = "Mirrored Glow waveform style",
               tint = if (visualizerStyle == WaveformStyle.MIRRORED_GLOW) AmberGold else TextMuted,
-              modifier = Modifier.size(16.dp)
+              modifier = Modifier.size(18.dp)
             )
           }
           IconButton(
             onClick = { visualizerStyle = WaveformStyle.BARS },
             modifier = Modifier
-              .minimumInteractiveComponentSize()
-              .size(34.dp)
+              .size(48.dp)
               .testTag("style_bars")
           ) {
             Icon(
               imageVector = Icons.Default.GraphicEq,
               contentDescription = "Standard bars waveform style",
               tint = if (visualizerStyle == WaveformStyle.BARS) StudioCyan else TextMuted,
-              modifier = Modifier.size(16.dp)
+              modifier = Modifier.size(18.dp)
             )
           }
           IconButton(
             onClick = { visualizerStyle = WaveformStyle.OSCILLOSCOPE },
             modifier = Modifier
-              .minimumInteractiveComponentSize()
-              .size(34.dp)
+              .size(48.dp)
               .testTag("style_oscilloscope")
           ) {
             Icon(
               imageVector = Icons.Default.Timeline,
               contentDescription = "Oscilloscope waveform style",
               tint = if (visualizerStyle == WaveformStyle.OSCILLOSCOPE) StudioWinner else TextMuted,
-              modifier = Modifier.size(16.dp)
+              modifier = Modifier.size(18.dp)
             )
           }
         }
@@ -1102,8 +1099,7 @@ fun WaveformTransportBar(
               contentColor = Color.Black
             ),
             modifier = Modifier
-              .minimumInteractiveComponentSize()
-              .size(40.dp)
+              .size(48.dp)
               .testTag("action_transport_play_pause")
           ) {
             Icon(

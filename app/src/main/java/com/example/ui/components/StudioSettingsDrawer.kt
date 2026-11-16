@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -200,6 +202,10 @@ fun StudioSettingsDrawerSheet(
             ),
             modifier = Modifier
               .fillMaxWidth()
+              .defaultMinSize(minHeight = 48.dp)
+              .semantics {
+                contentDescription = "Visualizer sensitivity ${"%.2fx".format(sensitivity)}"
+              }
               .testTag("visualizer_sensitivity_slider")
           )
 
@@ -221,7 +227,8 @@ fun StudioSettingsDrawerSheet(
               colors = ButtonDefaults.outlinedButtonColors(contentColor = AmberGold),
               border = BorderStroke(1.dp, AmberGold.copy(alpha = 0.5f)),
               modifier = Modifier
-                .defaultMinSize(minHeight = 36.dp)
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .semantics { contentDescription = "Reset visualizer sensitivity to 1.0x" }
                 .testTag("action_reset_sensitivity")
             ) {
               Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -271,7 +278,12 @@ fun StudioSettingsDrawerSheet(
                 uncheckedTrackColor = StudioCardElevated,
                 uncheckedBorderColor = StudioBorder
               ),
-              modifier = Modifier.testTag("switch_peak_hold_markers")
+              modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .semantics {
+                  contentDescription = "Peak-hold markers ${if (peakHoldEnabled) "enabled" else "disabled"}"
+                }
+                .testTag("switch_peak_hold_markers")
             )
           }
 

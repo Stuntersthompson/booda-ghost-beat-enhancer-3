@@ -12,9 +12,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,6 +40,7 @@ import com.example.data.repository.PromptHistoryRepository
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RecentPromptsHistoryCard(
   history: List<PromptHistoryEntity>,
@@ -45,10 +49,22 @@ fun RecentPromptsHistoryCard(
   onDeleteEntry: (Long) -> Unit,
   onClearAll: () -> Unit,
   modifier: Modifier = Modifier,
-  defaultExpanded: Boolean = true
+  defaultExpanded: Boolean = true,
+  onExportBackupFile: (() -> Unit)? = null,
+  onCopyBackupJson: (() -> Unit)? = null,
+  onImportBackupFile: (() -> Unit)? = null,
+  onImportBackupJson: ((String, Boolean) -> Unit)? = null
 ) {
   var expanded by rememberSaveable { mutableStateOf(defaultExpanded) }
   var showClearDialog by rememberSaveable { mutableStateOf(false) }
+  var showPasteImportDialog by rememberSaveable { mutableStateOf(false) }
+  var pasteJsonInput by rememberSaveable { mutableStateOf("") }
+  var restoreSnapshotToggle by rememberSaveable { mutableStateOf(true) }
+
+  val hasBackupActions = onExportBackupFile != null ||
+    onCopyBackupJson != null ||
+    onImportBackupFile != null ||
+    onImportBackupJson != null
 
   Surface(
     color = StudioCard,
@@ -70,7 +86,7 @@ fun RecentPromptsHistoryCard(
           verticalAlignment = Alignment.CenterVertically,
           modifier = Modifier
             .weight(1f)
-            .minimumInteractiveComponentSize()
+            .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(8.dp))
             .clickable { expanded = !expanded }
             .semantics {
@@ -115,7 +131,7 @@ fun RecentPromptsHistoryCard(
             IconButton(
               onClick = { showClearDialog = true },
               modifier = Modifier
-                .minimumInteractiveComponentSize()
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .testTag("action_clear_prompt_history")
             ) {
               Icon(
@@ -128,7 +144,7 @@ fun RecentPromptsHistoryCard(
           }
           IconButton(
             onClick = { expanded = !expanded },
-            modifier = Modifier.minimumInteractiveComponentSize()
+            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
           ) {
             Icon(
               imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -142,6 +158,77 @@ fun RecentPromptsHistoryCard(
 
       AnimatedVisibility(visible = expanded) {
         Column(modifier = Modifier.padding(top = 8.dp)) {
+          if (hasBackupActions) {
+            FlowRow(
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalArrangement = Arrangement.spacedBy(6.dp),
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp)
+            ) {
+              if (onExportBackupFile != null) {
+                OutlinedButton(
+                  onClick = onExportBackupFile,
+                  shape = RoundedCornerShape(8.dp),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                  modifier = Modifier
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .semantics { contentDescription = "Save prompt history and studio snapshot to JSON file" }
+                    .testTag("action_export_history_file")
+                ) {
+                  Icon(Icons.Default.FileUpload, contentDescription = null, tint = AmberGold, modifier = Modifier.size(15.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Save JSON", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+                }
+              }
+              if (onCopyBackupJson != null) {
+                OutlinedButton(
+                  onClick = onCopyBackupJson,
+                  shape = RoundedCornerShape(8.dp),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                  modifier = Modifier
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .semantics { contentDescription = "Copy prompt history backup JSON to clipboard" }
+                    .testTag("action_copy_history_json")
+                ) {
+                  Icon(Icons.Default.ContentCopy, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(15.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Copy JSON", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+                }
+              }
+              if (onImportBackupFile != null) {
+                OutlinedButton(
+                  onClick = onImportBackupFile,
+                  shape = RoundedCornerShape(8.dp),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                  modifier = Modifier
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .semantics { contentDescription = "Load prompt history backup from JSON file" }
+                    .testTag("action_import_history_file")
+                ) {
+                  Icon(Icons.Default.FileDownload, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(15.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Load File", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
+                }
+              }
+              if (onImportBackupJson != null) {
+                OutlinedButton(
+                  onClick = { showPasteImportDialog = true },
+                  shape = RoundedCornerShape(8.dp),
+                  contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                  modifier = Modifier
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .semantics { contentDescription = "Paste JSON prompt history backup" }
+                    .testTag("action_paste_history_json")
+                ) {
+                  Icon(Icons.Default.ContentPaste, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(15.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text("Paste JSON", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
+                }
+              }
+            }
+          }
+
           if (history.isEmpty()) {
             Surface(
               color = StudioBg,
@@ -199,13 +286,91 @@ fun RecentPromptsHistoryCard(
             onClearAll()
             showClearDialog = false
           },
-          colors = ButtonDefaults.buttonColors(containerColor = StudioMiss)
+          colors = ButtonDefaults.buttonColors(containerColor = StudioMiss),
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
         ) {
           Text("Clear History", color = Color.White)
         }
       },
       dismissButton = {
-        TextButton(onClick = { showClearDialog = false }) {
+        TextButton(
+          onClick = { showClearDialog = false },
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+        ) {
+          Text("Cancel", color = TextSecondary)
+        }
+      },
+      containerColor = StudioCardElevated
+    )
+  }
+
+  if (showPasteImportDialog && onImportBackupJson != null) {
+    AlertDialog(
+      onDismissRequest = { showPasteImportDialog = false },
+      title = { Text("Import Prompt History JSON", color = TextPrimary) },
+      text = {
+        Column(modifier = Modifier.testTag("dialog_import_history_json")) {
+          Text(
+            text = "Paste an exported prompt history JSON backup below to merge variations into Recent ${PromptHistoryRepository.MAX_HISTORY_COUNT}:",
+            color = TextSecondary,
+            style = MaterialTheme.typography.bodySmall
+          )
+          Spacer(modifier = Modifier.height(8.dp))
+          OutlinedTextField(
+            value = pasteJsonInput,
+            onValueChange = { pasteJsonInput = it },
+            placeholder = { Text("Paste prompt history JSON...") },
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(140.dp)
+              .testTag("input_import_history_json"),
+            textStyle = MonospacePrompt.copy(fontSize = 11.sp, color = TextPrimary)
+          )
+          Spacer(modifier = Modifier.height(8.dp))
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .defaultMinSize(minHeight = 48.dp)
+              .clip(RoundedCornerShape(8.dp))
+              .clickable { restoreSnapshotToggle = !restoreSnapshotToggle }
+              .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Checkbox(
+              checked = restoreSnapshotToggle,
+              onCheckedChange = { restoreSnapshotToggle = it }
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = "Also restore compliance snapshot (prompts & sliders) if included",
+              style = MaterialTheme.typography.labelSmall,
+              color = TextPrimary
+            )
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            if (pasteJsonInput.isNotBlank()) {
+              onImportBackupJson(pasteJsonInput, restoreSnapshotToggle)
+              pasteJsonInput = ""
+            }
+            showPasteImportDialog = false
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = StudioCyan),
+          modifier = Modifier
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .testTag("action_confirm_import_history")
+        ) {
+          Text("Import Backup", color = Color.Black)
+        }
+      },
+      dismissButton = {
+        TextButton(
+          onClick = { showPasteImportDialog = false },
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+        ) {
           Text("Cancel", color = TextSecondary)
         }
       },
@@ -288,7 +453,7 @@ private fun RecentHistoryVariationCard(
               onCopy()
             },
             modifier = Modifier
-              .minimumInteractiveComponentSize()
+              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
               .testTag("action_copy_history_${entry.id}")
           ) {
             Icon(
@@ -301,7 +466,7 @@ private fun RecentHistoryVariationCard(
           IconButton(
             onClick = onDelete,
             modifier = Modifier
-              .minimumInteractiveComponentSize()
+              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
               .testTag("action_delete_history_${entry.id}")
           ) {
             Icon(

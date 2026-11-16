@@ -9,6 +9,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,7 +60,7 @@ fun SettingsCardView(
 
         IconButton(
           onClick = onResetToDefaults,
-          modifier = Modifier.minimumInteractiveComponentSize()
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
         ) {
           Icon(
             imageVector = Icons.Default.Refresh,
@@ -147,7 +149,12 @@ private fun SettingSlider(
         activeTrackColor = AmberGold,
         inactiveTrackColor = StudioBorder
       ),
-      modifier = Modifier.height(28.dp)
+      modifier = Modifier
+        .fillMaxWidth()
+        .defaultMinSize(minHeight = 48.dp)
+        .semantics {
+          contentDescription = "$label slider, value $value, $tip"
+        }
     )
   }
 }

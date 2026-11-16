@@ -86,13 +86,21 @@ sealed interface SearchGroundingUiState {
  */
 class GeminiBeatService {
 
-  private companion object {
-    const val TAG = "GeminiBeatService"
-    const val MODEL_CONSULTATION = "gemini-3.8-flash"
-    const val MODEL_TRANSCRIBE = "gemini-3.5-transcribe"
-    const val MODEL_SEARCH_GROUNDING = "gemini-4-hydrogen"
-    const val AI_TIMEOUT_MS = 60_000L
-    const val MAX_INLINE_AUDIO_BYTES = 18 * 1024 * 1024
+  companion object {
+    private const val TAG = "GeminiBeatService"
+    private const val MODEL_CONSULTATION = "gemini-3.8-flash"
+    private const val MODEL_TRANSCRIBE = "gemini-3.5-transcribe"
+    private const val MODEL_SEARCH_GROUNDING = "gemini-4-hydrogen"
+    private const val AI_TIMEOUT_MS = 60_000L
+    private const val MAX_INLINE_AUDIO_BYTES = 18 * 1024 * 1024
+
+    fun isSafeHttpUri(rawUri: String): Boolean {
+      val trimmed = rawUri.trim()
+      if (trimmed.isEmpty() || trimmed.any { it.isWhitespace() }) return false
+      val lower = trimmed.lowercase()
+      return (lower.startsWith("https://") && trimmed.length > "https://".length) ||
+        (lower.startsWith("http://") && trimmed.length > "http://".length)
+    }
   }
 
   private val consultationSchema: Schema by lazy {

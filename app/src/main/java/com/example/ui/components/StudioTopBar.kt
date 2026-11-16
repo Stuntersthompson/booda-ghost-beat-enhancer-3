@@ -17,6 +17,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -91,18 +96,23 @@ fun StudioTopBar(
             color = StudioCardElevated,
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
+              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
               .clip(RoundedCornerShape(16.dp))
               .clickable { onLaneClick() }
               .border(1.dp, StudioBorder, RoundedCornerShape(16.dp))
+              .semantics {
+                role = Role.Button
+                contentDescription = "Active lane $activeLane. Tap to switch subgenre lane"
+              }
               .testTag("active_lane_chip")
           ) {
             Row(
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
               Icon(
                 imageVector = Icons.Default.Tune,
-                contentDescription = "Lane",
+                contentDescription = null,
                 tint = StudioCyan,
                 modifier = Modifier.size(14.dp)
               )
@@ -119,7 +129,7 @@ fun StudioTopBar(
           IconButton(
             onClick = onSettingsClick,
             modifier = Modifier
-              .minimumInteractiveComponentSize()
+              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
               .testTag("action_open_settings")
           ) {
             Icon(
@@ -148,9 +158,15 @@ fun StudioTopBar(
         Box(
           modifier = Modifier
             .weight(1f)
+            .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(if (isPreserve) AmberGold else Color.Transparent)
             .clickable { onJobTypeChanged(JobType.PRESERVE) }
+            .semantics {
+              role = Role.Tab
+              selected = isPreserve
+              contentDescription = "Preserve Extend mode, locks original sample and vocals"
+            }
             .padding(vertical = 8.dp)
             .testTag("job_preserve_tab"),
           contentAlignment = Alignment.Center
@@ -158,7 +174,7 @@ fun StudioTopBar(
           Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
               imageVector = Icons.Default.Lock,
-              contentDescription = "Preserve Lock",
+              contentDescription = null,
               tint = if (isPreserve) Color.Black else TextSecondary,
               modifier = Modifier.size(14.dp)
             )
@@ -177,9 +193,15 @@ fun StudioTopBar(
         Box(
           modifier = Modifier
             .weight(1f)
+            .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(if (!isPreserve) StudioCyan else Color.Transparent)
             .clickable { onJobTypeChanged(JobType.ORIGINAL) }
+            .semantics {
+              role = Role.Tab
+              selected = !isPreserve
+              contentDescription = "Original Create mode, fresh instrumental generation"
+            }
             .padding(vertical = 8.dp)
             .testTag("job_original_tab"),
           contentAlignment = Alignment.Center

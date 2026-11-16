@@ -2,12 +2,17 @@ package com.example.data.repository
 
 import android.content.Context
 import com.example.data.model.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
-import java.io.InputStreamReader
 
 class PromptBankRepository(private val context: Context) {
 
   private var initialized = false
+  private val _loadError = MutableStateFlow<String?>(null)
+  val loadError: StateFlow<String?> = _loadError.asStateFlow()
+  val isLoaded: Boolean get() = initialized
 
   val stylePrompts = mutableListOf<StylePrompt>()
   val gospelPrompts = mutableListOf<GospelPrompt>()
@@ -250,9 +255,29 @@ class PromptBankRepository(private val context: Context) {
       }
 
       initialized = true
+      _loadError.value = null
     } catch (e: Exception) {
       e.printStackTrace()
+      if (allLanes.isEmpty()) {
+        allLanes.addAll(expansionLanes.map { it.name })
+      }
+      _loadError.value = "Prompt bank failed to load (${e.localizedMessage ?: "asset error"}). Tap Retry."
     }
+  }
+
+  fun retryLoad() {
+    initialized = false
+    stylePrompts.clear()
+    gospelPrompts.clear()
+    slotTemplates.clear()
+    lyricsBoxTemplates.clear()
+    excludeBanks.clear()
+    settingsCards.clear()
+    verifiedLanes.clear()
+    universalLanes.clear()
+    lyricsTopics.clear()
+    allLanes.clear()
+    ensureLoaded()
   }
 
   fun laneDrums(lane: String): String {

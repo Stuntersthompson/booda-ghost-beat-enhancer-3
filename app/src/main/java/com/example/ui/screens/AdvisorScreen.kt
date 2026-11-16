@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ai.GeminiBeatService
 import com.example.ai.SearchGroundedAnswer
 import com.example.ai.SearchGroundingUiState
 import com.example.data.model.ComplianceAuditReport
@@ -189,6 +191,7 @@ private fun AdvisorLiveResearchCard(
   onClear: () -> Unit
 ) {
   var queryInput by rememberSaveable { mutableStateOf("") }
+  val researchContext = LocalContext.current
   val uriHandler = LocalUriHandler.current
   val quickQueries = listOf(
     "Suno v6 Extend rules",
@@ -398,9 +401,15 @@ private fun AdvisorLiveResearchCard(
           SearchGroundedAnswerPanel(
             result = state.result,
             onOpenUri = { uri ->
-              try {
-                uriHandler.openUri(uri)
-              } catch (_: Exception) {}
+              if (GeminiBeatService.isSafeHttpUri(uri)) {
+                try {
+                  uriHandler.openUri(uri)
+                } catch (_: Exception) {
+                  Toast.makeText(researchContext, "No browser app available to open source link.", Toast.LENGTH_SHORT).show()
+                }
+              } else {
+                Toast.makeText(researchContext, "Blocked unsafe or invalid source URL.", Toast.LENGTH_SHORT).show()
+              }
             },
             onClear = onClear
           )

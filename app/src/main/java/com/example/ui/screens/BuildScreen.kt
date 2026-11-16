@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,6 +70,7 @@ fun BuildScreen(viewModel: MainViewModel) {
   val handoffStepsDone by viewModel.handoffStepsDone.collectAsStateWithLifecycle()
   val recentHistory by viewModel.recentPromptHistory.collectAsStateWithLifecycle()
   val micTranscriptionState by viewModel.micTranscriptionState.collectAsStateWithLifecycle()
+  val micPermissionDenied by viewModel.micPermissionDenied.collectAsStateWithLifecycle()
 
   var showSaveModal by rememberSaveable { mutableStateOf(false) }
   var takeNameInput by rememberSaveable { mutableStateOf("") }
@@ -74,9 +78,26 @@ fun BuildScreen(viewModel: MainViewModel) {
   var showExcludeDropdown by remember { mutableStateOf(false) }
   var pendingTranscriptionTarget by rememberSaveable { mutableStateOf(TranscriptionTarget.BUILD_LYRICS) }
 
+  val exportHistoryLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.CreateDocument("application/json")
+  ) { uri: Uri? ->
+    if (uri != null) {
+      viewModel.exportPromptHistoryToUri(context, uri, includeSnapshot = true)
+    }
+  }
+
+  val importHistoryLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.OpenDocument()
+  ) { uri: Uri? ->
+    if (uri != null) {
+      viewModel.importPromptHistoryFromUri(context, uri, restoreSnapshot = true)
+    }
+  }
+
   val dictatePermissionLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission()
   ) { isGranted ->
+    viewModel.onMicrophonePermissionResult(isGranted)
     if (isGranted) {
       viewModel.startMicTranscription(pendingTranscriptionTarget)
     } else {
@@ -141,14 +162,13 @@ fun BuildScreen(viewModel: MainViewModel) {
                   contentColor = Color.Black
                 ),
                 modifier = Modifier
-                  .minimumInteractiveComponentSize()
-                  .size(30.dp)
+                  .size(48.dp)
                   .testTag("build_monitor_play_pause")
               ) {
                 Icon(
                   imageVector = if (isPlayingAudio) Icons.Default.Pause else Icons.Default.PlayArrow,
                   contentDescription = if (isPlayingAudio) "Pause groove preview" else "Play groove preview",
-                  modifier = Modifier.size(16.dp)
+                  modifier = Modifier.size(18.dp)
                 )
               }
             }
@@ -260,21 +280,71 @@ fun BuildScreen(viewModel: MainViewModel) {
   }
 
   val voiceDictationCard: @Composable () -> Unit = {
-    BuildVoiceTranscriptionCard(
-      state = micTranscriptionState,
-      onToggleDictate = { target ->
-        if (micTranscriptionState is TranscriptionUiState.Recording) {
-          viewModel.stopMicTranscription()
-        } else {
-          pendingTranscriptionTarget = target
-          dictatePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      if (micPermissionDenied) {
+        Surface(
+          color = StudioCardElevated,
+          shape = RoundedCornerShape(10.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, AmberGold.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+            .testTag("mic_permission_denied_banner")
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = "Microphone access denied. Enable it in App Settings to use voice dictation.",
+              style = MaterialTheme.typography.bodySmall,
+              color = TextSecondary,
+              modifier = Modifier.weight(1f)
+            )
+            TextButton(
+              onClick = {
+                try {
+                  context.startActivity(
+                    Intent(
+                      Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                      Uri.fromParts("package", context.packageName, null)
+                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                  )
+                } catch (_: Exception) {
+                  Toast.makeText(context, "Open Settings > Apps to grant Microphone permission.", Toast.LENGTH_SHORT).show()
+                }
+              },
+              modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            ) {
+              Text("Settings", color = StudioCyan, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+            }
+            IconButton(
+              onClick = { viewModel.dismissMicPermissionDenied() },
+              modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .testTag("action_dismiss_mic_denied")
+            ) {
+              Icon(Icons.Default.Close, contentDescription = "Dismiss microphone permission notice", tint = TextMuted, modifier = Modifier.size(16.dp))
+            }
+          }
         }
-      },
-      onApplyToLyrics = { text -> viewModel.applyTranscriptToLyrics(text, context) },
-      onApplyToStyle = { text -> viewModel.applyTranscriptToStyle(text, context) },
-      onRetry = { viewModel.retryLastTranscription() },
-      onDismiss = { viewModel.dismissTranscriptionState() }
-    )
+      }
+      BuildVoiceTranscriptionCard(
+        state = micTranscriptionState,
+        onToggleDictate = { target ->
+          if (micTranscriptionState is TranscriptionUiState.Recording) {
+            viewModel.stopMicTranscription()
+          } else {
+            pendingTranscriptionTarget = target
+            dictatePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+          }
+        },
+        onApplyToLyrics = { text -> viewModel.applyTranscriptToLyrics(text, context) },
+        onApplyToStyle = { text -> viewModel.applyTranscriptToStyle(text, context) },
+        onRetry = { viewModel.retryLastTranscription() },
+        onDismiss = { viewModel.dismissTranscriptionState() }
+      )
+    }
   }
 
   val bundleActionButtons: @Composable () -> Unit = {
@@ -509,7 +579,13 @@ fun BuildScreen(viewModel: MainViewModel) {
                 viewModel.copyToClipboard(context, "Suno Prompt", entry.prompt)
               },
               onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
-              onClearAll = { viewModel.clearPromptHistory() }
+              onClearAll = { viewModel.clearPromptHistory() },
+              onExportBackupFile = { exportHistoryLauncher.launch("booda_prompt_history.json") },
+              onCopyBackupJson = { viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = true) },
+              onImportBackupFile = { importHistoryLauncher.launch(arrayOf("application/json", "text/plain")) },
+              onImportBackupJson = { json, restore ->
+                viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore)
+              }
             )
           }
           item {
@@ -599,7 +675,13 @@ fun BuildScreen(viewModel: MainViewModel) {
               viewModel.copyToClipboard(context, "Suno Prompt", entry.prompt)
             },
             onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
-            onClearAll = { viewModel.clearPromptHistory() }
+            onClearAll = { viewModel.clearPromptHistory() },
+            onExportBackupFile = { exportHistoryLauncher.launch("booda_prompt_history.json") },
+            onCopyBackupJson = { viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = true) },
+            onImportBackupFile = { importHistoryLauncher.launch(arrayOf("application/json", "text/plain")) },
+            onImportBackupJson = { json, restore ->
+              viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore)
+            }
           )
         }
         item {
@@ -722,13 +804,17 @@ fun BuildScreen(viewModel: MainViewModel) {
             )
             showSaveModal = false
           },
-          colors = ButtonDefaults.buttonColors(containerColor = AmberGold)
+          colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
         ) {
           Text("Save Take", color = Color.Black)
         }
       },
       dismissButton = {
-        TextButton(onClick = { showSaveModal = false }) {
+        TextButton(
+          onClick = { showSaveModal = false },
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+        ) {
           Text("Cancel", color = TextSecondary)
         }
       },

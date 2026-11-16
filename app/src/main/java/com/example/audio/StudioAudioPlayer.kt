@@ -130,6 +130,10 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
     data class PcmSource(val samples: FloatArray, val sampleRate: Int) : AudioSource
   }
 
+  private val engineLock = Any()
+  private var loadGeneration: Long = 0L
+  private var loadJob: Job? = null
+
   private var activeSource: AudioSource? = null
   private var mediaPlayer: MediaPlayer? = null
   private var audioTrack: AudioTrack? = null
@@ -161,53 +165,105 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
   private val _progress = MutableStateFlow(0f)
   val progress: StateFlow<Float> = _progress.asStateFlow()
 
+  private val _playbackError = MutableStateFlow<String?>(null)
+  val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
+
+  fun clearPlaybackError() {
+    _playbackError.value = null
+  }
+
   fun loadUri(context: Context, uri: Uri, fallbackDurationMs: Long = 0L) {
+    val myGen = synchronized(engineLock) {
+      loadJob?.cancel()
+      ++loadGeneration
+    }
     releaseActiveEngines()
-    activeSource = AudioSource.UriSource(context.applicationContext, uri)
+    _playbackError.value = null
+    val appCtx = context.applicationContext
+    activeSource = AudioSource.UriSource(appCtx, uri)
     pcmCursorSample = 0
     _positionMs.value = 0L
     _progress.value = 0f
+    _durationMs.value = fallbackDurationMs.coerceAtLeast(0L)
+    _hasAudio.value = false
 
-    try {
-      val mp = MediaPlayer().apply {
-        setAudioAttributes(
-          AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-            .build()
-        )
-        setDataSource(context.applicationContext, uri)
-        prepare()
-        isLooping = _isLooping.value
-        setOnCompletionListener {
-          if (!_isLooping.value) {
-            _isPlaying.value = false
-            progressPollJob?.cancel()
-            _positionMs.value = 0L
-            _progress.value = 0f
-            try {
-              seekTo(0)
-            } catch (_: Exception) {}
-          } else {
-            _positionMs.value = 0L
-            _progress.value = 0f
+    loadJob = scope.launch(Dispatchers.IO) {
+      var candidate: MediaPlayer? = null
+      try {
+        val mp = MediaPlayer().apply {
+          setAudioAttributes(
+            AudioAttributes.Builder()
+              .setUsage(AudioAttributes.USAGE_MEDIA)
+              .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+              .build()
+          )
+          setDataSource(appCtx, uri)
+          isLooping = _isLooping.value
+          setOnCompletionListener {
+            if (!_isLooping.value) {
+              _isPlaying.value = false
+              progressPollJob?.cancel()
+              _positionMs.value = 0L
+              _progress.value = 0f
+              try {
+                seekTo(0)
+              } catch (_: Exception) {}
+            } else {
+              _positionMs.value = 0L
+              _progress.value = 0f
+            }
+          }
+          setOnPreparedListener { prepared ->
+            val current = synchronized(engineLock) { myGen == loadGeneration }
+            if (!current) {
+              try { prepared.release() } catch (_: Exception) {}
+              return@setOnPreparedListener
+            }
+            mediaPlayer = prepared
+            val dur = try { prepared.duration.toLong() } catch (_: Exception) { 0L }
+              .let { if (it > 0L) it else fallbackDurationMs }
+            _durationMs.value = dur.coerceAtLeast(0L)
+            _hasAudio.value = true
+          }
+          setOnErrorListener { failed, _, _ ->
+            val current = synchronized(engineLock) { myGen == loadGeneration }
+            try { failed.release() } catch (_: Exception) {}
+            if (current) {
+              mediaPlayer = null
+              _isPlaying.value = false
+              _hasAudio.value = false
+              _playbackError.value = "Audio preview unavailable for this file."
+            }
+            true
           }
         }
+        candidate = mp
+        val stillCurrent = synchronized(engineLock) { myGen == loadGeneration }
+        if (!stillCurrent) {
+          mp.release()
+          return@launch
+        }
+        mp.prepareAsync()
+      } catch (e: Exception) {
+        try { candidate?.release() } catch (_: Exception) {}
+        val current = synchronized(engineLock) { myGen == loadGeneration }
+        if (current) {
+          mediaPlayer = null
+          _durationMs.value = fallbackDurationMs.coerceAtLeast(0L)
+          _hasAudio.value = false
+          _playbackError.value = e.localizedMessage ?: "Audio preview unavailable for this file."
+        }
       }
-      mediaPlayer = mp
-      val dur = mp.duration.toLong().let { if (it > 0L) it else fallbackDurationMs }
-      _durationMs.value = dur.coerceAtLeast(0L)
-      _hasAudio.value = true
-    } catch (e: Exception) {
-      e.printStackTrace()
-      mediaPlayer = null
-      _durationMs.value = fallbackDurationMs.coerceAtLeast(0L)
-      _hasAudio.value = false
     }
   }
 
   fun loadPcm(samples: FloatArray, sampleRate: Int = 44100) {
+    synchronized(engineLock) {
+      loadJob?.cancel()
+      ++loadGeneration
+    }
     releaseActiveEngines()
+    _playbackError.value = null
     if (samples.isEmpty()) {
       activeSource = null
       _hasAudio.value = false
@@ -511,11 +567,16 @@ class StudioAudioPlayer(private val scope: CoroutineScope) {
   }
 
   fun release() {
+    synchronized(engineLock) {
+      loadJob?.cancel()
+      ++loadGeneration
+    }
     releaseActiveEngines()
     activeSource = null
     _hasAudio.value = false
     _positionMs.value = 0L
     _durationMs.value = 0L
     _progress.value = 0f
+    _playbackError.value = null
   }
 }

@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -28,6 +31,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +63,22 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
   val curatedCategory by viewModel.curatedCategory.collectAsStateWithLifecycle()
   val searchQuery by viewModel.curatedSearchQuery.collectAsStateWithLifecycle()
   val recentHistory by viewModel.recentPromptHistory.collectAsStateWithLifecycle()
+
+  val exportHistoryLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.CreateDocument("application/json")
+  ) { uri: Uri? ->
+    if (uri != null) {
+      viewModel.exportPromptHistoryToUri(context, uri, includeSnapshot = true)
+    }
+  }
+
+  val importHistoryLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.OpenDocument()
+  ) { uri: Uri? ->
+    if (uri != null) {
+      viewModel.importPromptHistoryFromUri(context, uri, restoreSnapshot = true)
+    }
+  }
 
   // Local query state with 250ms debounce
   var rawSearchInput by rememberSaveable { mutableStateOf(searchQuery) }
@@ -243,6 +264,7 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
               },
               shape = RoundedCornerShape(12.dp),
               modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .clickable { viewModel.setCuratedCategory(cat) }
                 .border(
@@ -250,10 +272,13 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
                   if (isSelected) Color.Transparent else StudioBorder,
                   RoundedCornerShape(12.dp)
                 )
+                .semantics {
+                  contentDescription = "$chipLabel filter${if (isSelected) ", selected" else ""}"
+                }
             ) {
               Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
               ) {
                 if (isFavChip) {
                   Icon(
@@ -295,14 +320,14 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
               Button(
                 onClick = { viewModel.exportFavorites(context, asJson = true) },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
                 shape = RoundedCornerShape(6.dp),
-                modifier = Modifier.height(32.dp)
+                modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
               ) {
-                Icon(Icons.Default.Download, contentDescription = null, tint = AmberGold, modifier = Modifier.size(12.dp))
+                Icon(Icons.Default.Download, contentDescription = null, tint = AmberGold, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Export JSON", style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = AmberGold)
+                Text("Export JSON", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp), color = AmberGold)
               }
             }
           }
@@ -452,7 +477,7 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
             },
             colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.weight(1f).height(44.dp).testTag("action_copy_generator_prompt")
+            modifier = Modifier.weight(1f).defaultMinSize(minWidth = 48.dp, minHeight = 48.dp).testTag("action_copy_generator_prompt")
           ) {
             Icon(
               imageVector = if (builderCopiedFlash) Icons.Default.Check else Icons.Default.ContentCopy,
@@ -466,11 +491,11 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
 
           Button(
             onClick = {
-              viewModel.sharePrompt(context, "Suno Style Prompt", generatedPrompt)
+              viewModel.sharePrompt(context, "Suno Style Prompt", generatedPrompt, source = "Builder", lane = activeLane)
             },
             colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.weight(0.8f).height(44.dp).testTag("action_share_generator_prompt")
+            modifier = Modifier.weight(0.8f).defaultMinSize(minWidth = 48.dp, minHeight = 48.dp).testTag("action_share_generator_prompt")
           ) {
             Icon(Icons.Default.Share, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
@@ -491,7 +516,7 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
             },
             colors = ButtonDefaults.buttonColors(containerColor = StudioCyan),
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.weight(1f).height(44.dp).testTag("action_send_to_build_from_gen")
+            modifier = Modifier.weight(1f).defaultMinSize(minWidth = 48.dp, minHeight = 48.dp).testTag("action_send_to_build_from_gen")
           ) {
             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(4.dp))
@@ -542,7 +567,8 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
           Button(
             onClick = { viewModel.setCuratedCategory("All") },
             colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
           ) {
             Text("Browse All 150 Prompts", color = AmberGold)
           }
@@ -572,7 +598,8 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
               viewModel.clearCuratedFilters()
             },
             colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
           ) {
             Text("Clear Filters", color = Color.Black)
           }
@@ -620,7 +647,13 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
         )
       },
       onShare = {
-        viewModel.sharePrompt(context, "Suno Prompt #${item.id} (${item.subgenre})", item.prompt)
+        viewModel.sharePrompt(
+          context,
+          "Suno Prompt #${item.id} (${item.subgenre})",
+          item.prompt,
+          source = "Curated",
+          lane = item.subgenre
+        )
       },
       onUseInBuild = {
         viewModel.updateStylePrompt(item.prompt)
@@ -685,7 +718,13 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
                 viewModel.copyToClipboard(context, "Suno Prompt", entry.prompt)
               },
               onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
-              onClearAll = { viewModel.clearPromptHistory() }
+              onClearAll = { viewModel.clearPromptHistory() },
+              onExportBackupFile = { exportHistoryLauncher.launch("booda_prompt_history.json") },
+              onCopyBackupJson = { viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = true) },
+              onImportBackupFile = { importHistoryLauncher.launch(arrayOf("application/json", "text/plain")) },
+              onImportBackupJson = { json, restore ->
+                viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore)
+              }
             )
           }
         }
@@ -743,7 +782,13 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
               viewModel.copyToClipboard(context, "Suno Prompt", entry.prompt)
             },
             onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
-            onClearAll = { viewModel.clearPromptHistory() }
+            onClearAll = { viewModel.clearPromptHistory() },
+            onExportBackupFile = { exportHistoryLauncher.launch("booda_prompt_history.json") },
+            onCopyBackupJson = { viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = true) },
+            onImportBackupFile = { importHistoryLauncher.launch(arrayOf("application/json", "text/plain")) },
+            onImportBackupJson = { json, restore ->
+              viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore)
+            }
           )
         }
         if (filteredPrompts.isEmpty()) {
@@ -775,16 +820,21 @@ private fun ChipOption(text: String, isSelected: Boolean, onClick: () -> Unit) {
     color = if (isSelected) AmberContainer else StudioCardElevated,
     shape = RoundedCornerShape(8.dp),
     modifier = Modifier
+      .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
       .clip(RoundedCornerShape(8.dp))
       .clickable { onClick() }
       .border(0.5.dp, if (isSelected) AmberGold else StudioBorder, RoundedCornerShape(8.dp))
+      .semantics {
+        contentDescription = "$text option${if (isSelected) ", selected" else ""}"
+      }
   ) {
-    Text(
-      text = text,
-      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-      color = if (isSelected) AmberGold else TextPrimary,
-      modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-    )
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+      Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+        color = if (isSelected) AmberGold else TextPrimary
+      )
+    }
   }
 }
 

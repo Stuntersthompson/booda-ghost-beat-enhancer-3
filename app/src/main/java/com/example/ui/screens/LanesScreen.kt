@@ -412,7 +412,8 @@ fun LanesScreen(viewModel: MainViewModel) {
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     modifier = Modifier
                       .minimumInteractiveComponentSize()
-                      .defaultMinSize(minHeight = 36.dp)
+                      .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                      .semantics { contentDescription = "Apply BPM preset for $laneName in Build" }
                       .testTag("action_apply_bpm_preset_$laneName")
                   ) {
                     Icon(Icons.Default.Bolt, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
@@ -455,7 +456,11 @@ fun LanesScreen(viewModel: MainViewModel) {
           if (!forceExpanded) {
             TextButton(
               onClick = { showComparisonDeck = !showComparisonDeck },
-              modifier = Modifier.minimumInteractiveComponentSize()
+              modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .semantics {
+                  contentDescription = if (showComparisonDeck) "Hide side-by-side lane comparison deck" else "Show side-by-side lane comparison deck"
+                }
             ) {
               Text(
                 text = if (showComparisonDeck) "Hide Deck ▲" else "Compare Lanes ▾",
@@ -476,7 +481,10 @@ fun LanesScreen(viewModel: MainViewModel) {
               OutlinedButton(
                 onClick = { showDropdownA = true },
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                  .semantics { contentDescription = "Select Lane A for comparison, currently $laneA" },
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
               ) {
                 Text(laneA.take(16), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = AmberGold)
@@ -492,7 +500,10 @@ fun LanesScreen(viewModel: MainViewModel) {
               OutlinedButton(
                 onClick = { showDropdownB = true },
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                  .semantics { contentDescription = "Select Lane B for comparison, currently $laneB" },
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
               ) {
                 Text(laneB.take(16), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
@@ -683,7 +694,8 @@ private fun ComparisonLaneColumn(
         modifier = Modifier
           .fillMaxWidth()
           .minimumInteractiveComponentSize()
-          .defaultMinSize(minHeight = 36.dp)
+          .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+          .semantics { contentDescription = "Use $lane as active subgenre lane" }
       ) {
         Text("Use $lane", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = Color.Black, maxLines = 1)
       }
@@ -772,7 +784,8 @@ private fun LaneCatalogCard(
             shape = RoundedCornerShape(6.dp),
             modifier = Modifier
               .minimumInteractiveComponentSize()
-              .defaultMinSize(minHeight = 36.dp)
+              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+              .semantics { contentDescription = "Select $lane as active lane" }
               .testTag("select_lane_${lane.lowercase().replace(" ", "_")}")
           ) {
             Text("Select", style = MaterialTheme.typography.labelSmall, color = StudioCyan)
@@ -808,7 +821,8 @@ private fun LaneCatalogCard(
           shape = RoundedCornerShape(8.dp),
           modifier = Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 44.dp)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics { contentDescription = "Load $lane BPM preset in Build" }
         ) {
           Icon(Icons.Default.Bolt, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
           Spacer(modifier = Modifier.width(6.dp))

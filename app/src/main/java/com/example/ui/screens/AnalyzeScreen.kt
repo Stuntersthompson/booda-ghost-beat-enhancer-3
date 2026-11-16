@@ -2,8 +2,10 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ai.AiConsultationUiState
+import com.example.ai.GeminiBeatService
 import com.example.ai.TranscriptionTarget
 import com.example.ai.TranscriptionUiState
 import com.example.audio.AudioAnalysisResult
@@ -57,6 +60,10 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
   val aiConsultationState by viewModel.aiConsultationState.collectAsStateWithLifecycle()
   val micTranscriptionState by viewModel.micTranscriptionState.collectAsStateWithLifecycle()
   val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
+  val audioError by viewModel.audioError.collectAsStateWithLifecycle()
+  val playbackError by viewModel.playbackError.collectAsStateWithLifecycle()
+  val micPermissionDenied by viewModel.micPermissionDenied.collectAsStateWithLifecycle()
+  val combinedAudioError = audioError ?: playbackError
 
   // Draw-scoped state holders (read inside Canvas/drawWithCache to avoid recomposition storms)
   val liveWaveformState = viewModel.liveWaveform.collectAsStateWithLifecycle()
@@ -93,6 +100,7 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
   val permissionLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission()
   ) { isGranted ->
+    viewModel.onMicrophonePermissionResult(isGranted)
     if (isGranted) {
       viewModel.startRecording()
     } else {
@@ -104,10 +112,23 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
   val transcribePermissionLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission()
   ) { isGranted ->
+    viewModel.onMicrophonePermissionResult(isGranted)
     if (isGranted) {
       viewModel.startMicTranscription(TranscriptionTarget.ANALYZE_SAMPLE_WORDS)
     } else {
       Toast.makeText(context, "Microphone permission is required to transcribe audio", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  val openAppSettingsAction: () -> Unit = {
+    try {
+      val intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", context.packageName, null)
+      ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+      context.startActivity(intent)
+    } catch (_: Exception) {
+      Toast.makeText(context, "Open device Settings > Apps to allow Microphone access.", Toast.LENGTH_SHORT).show()
     }
   }
 
@@ -133,6 +154,22 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
           contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
           verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+          if (combinedAudioError != null) {
+            item {
+              AudioErrorNoticeBanner(
+                message = combinedAudioError,
+                onDismiss = { viewModel.dismissAudioError() }
+              )
+            }
+          }
+          if (micPermissionDenied) {
+            item {
+              MicPermissionDeniedBanner(
+                onOpenSettings = openAppSettingsAction,
+                onDismiss = { viewModel.dismissMicPermissionDenied() }
+              )
+            }
+          }
           item {
             IngestionHeroCard(
               isRecording = isRecording,
@@ -262,6 +299,22 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
         contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
       ) {
+        if (combinedAudioError != null) {
+          item {
+            AudioErrorNoticeBanner(
+              message = combinedAudioError,
+              onDismiss = { viewModel.dismissAudioError() }
+            )
+          }
+        }
+        if (micPermissionDenied) {
+          item {
+            MicPermissionDeniedBanner(
+              onOpenSettings = openAppSettingsAction,
+              onDismiss = { viewModel.dismissMicPermissionDenied() }
+            )
+          }
+        }
         item {
           IngestionHeroCard(
             isRecording = isRecording,
@@ -409,17 +462,18 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
                 color = if (selected) AmberGold else StudioCardElevated,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
-                  .minimumInteractiveComponentSize()
+                  .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                   .clip(RoundedCornerShape(12.dp))
                   .clickable { wordsKind = kind }
                   .border(0.5.dp, StudioBorder, RoundedCornerShape(12.dp))
               ) {
-                Text(
-                  text = kind,
-                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                  color = if (selected) Color.Black else TextPrimary,
-                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                )
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                  Text(
+                    text = kind,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = if (selected) Color.Black else TextPrimary
+                  )
+                }
               }
             }
           }
@@ -431,18 +485,120 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
             viewModel.setSampleWords(wordsInput, wordsKind)
             showWordsDialog = false
           },
-          colors = ButtonDefaults.buttonColors(containerColor = AmberGold)
+          colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
         ) {
           Text("Save Words", color = Color.Black)
         }
       },
       dismissButton = {
-        TextButton(onClick = { showWordsDialog = false }) {
+        TextButton(
+          onClick = { showWordsDialog = false },
+          modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+        ) {
           Text("Cancel", color = TextSecondary)
         }
       },
       containerColor = StudioCardElevated
     )
+  }
+}
+
+@Composable
+private fun AudioErrorNoticeBanner(
+  message: String,
+  onDismiss: () -> Unit
+) {
+  Surface(
+    color = Color(0x22EF4444),
+    shape = RoundedCornerShape(10.dp),
+    modifier = Modifier
+      .fillMaxWidth()
+      .border(1.dp, StudioMiss.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+      .testTag("analyze_audio_error_banner")
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 12.dp, vertical = 8.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.weight(1f)
+      ) {
+        Icon(Icons.Default.ErrorOutline, contentDescription = "Audio error", tint = StudioMiss, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text = message,
+          style = MaterialTheme.typography.bodySmall,
+          color = TextPrimary
+        )
+      }
+      IconButton(
+        onClick = onDismiss,
+        modifier = Modifier
+          .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+          .testTag("action_dismiss_audio_error")
+      ) {
+        Icon(Icons.Default.Close, contentDescription = "Dismiss audio error", tint = TextSecondary, modifier = Modifier.size(18.dp))
+      }
+    }
+  }
+}
+
+@Composable
+private fun MicPermissionDeniedBanner(
+  onOpenSettings: () -> Unit,
+  onDismiss: () -> Unit
+) {
+  Surface(
+    color = StudioCardElevated,
+    shape = RoundedCornerShape(10.dp),
+    modifier = Modifier
+      .fillMaxWidth()
+      .border(1.dp, AmberGold.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+      .testTag("mic_permission_denied_banner")
+  ) {
+    Column(modifier = Modifier.padding(12.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+          Icon(Icons.Default.MicOff, contentDescription = null, tint = AmberGold, modifier = Modifier.size(18.dp))
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = "Microphone Access Denied",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = AmberGold
+          )
+        }
+        IconButton(
+          onClick = onDismiss,
+          modifier = Modifier
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .testTag("action_dismiss_mic_denied")
+        ) {
+          Icon(Icons.Default.Close, contentDescription = "Dismiss microphone permission notice", tint = TextSecondary, modifier = Modifier.size(16.dp))
+        }
+      }
+      Text(
+        text = "You can still import audio files and edit all Suno prompts offline. To enable live mic recording or dictation, allow Microphone in App Settings.",
+        style = MaterialTheme.typography.bodySmall,
+        color = TextSecondary
+      )
+      Spacer(modifier = Modifier.height(8.dp))
+      OutlinedButton(
+        onClick = onOpenSettings,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+      ) {
+        Text("Open App Settings", color = StudioCyan, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+      }
+    }
   }
 }
 
@@ -952,6 +1108,7 @@ private fun GeminiAnalystCard(
         )
       }
 
+      val cardContext = LocalContext.current
       val uriHandler = LocalUriHandler.current
       if (!aiConsultation?.searchGroundingSummary.isNullOrBlank()) {
         Spacer(modifier = Modifier.height(8.dp))
@@ -988,7 +1145,15 @@ private fun GeminiAnalystCard(
                     .defaultMinSize(minHeight = 48.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .clickable {
-                      try { uriHandler.openUri(src.uri) } catch (_: Exception) {}
+                      if (GeminiBeatService.isSafeHttpUri(src.uri)) {
+                        try {
+                          uriHandler.openUri(src.uri)
+                        } catch (_: Exception) {
+                          Toast.makeText(cardContext, "No browser app available to open link.", Toast.LENGTH_SHORT).show()
+                        }
+                      } else {
+                        Toast.makeText(cardContext, "Invalid or unsupported link URL.", Toast.LENGTH_SHORT).show()
+                      }
                     }
                     .padding(horizontal = 4.dp, vertical = 8.dp)
                     .semantics { contentDescription = "Open grounded source ${src.title}" },
