@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ai.configureAppCheck
+import com.example.ui.components.GlobalConnectivityBanner
 import com.example.ui.components.StudioBottomBar
 import com.example.ui.components.StudioNavigationRail
 import com.example.ui.components.StudioSettingsDrawerSheet
@@ -64,6 +65,7 @@ fun MainAppContent(viewModel: MainViewModel) {
   val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
   val jobType by viewModel.jobType.collectAsStateWithLifecycle()
   val bankLoadError by viewModel.bankLoadError.collectAsStateWithLifecycle()
+  val connectivityState by viewModel.connectivityState.collectAsStateWithLifecycle()
 
   var showLaneDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -134,6 +136,12 @@ fun MainAppContent(viewModel: MainViewModel) {
           }
 
           Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            GlobalConnectivityBanner(
+              state = connectivityState,
+              onRetry = { viewModel.retryConnectionAndLastRequest() },
+              onDismiss = { viewModel.dismissConnectivityBanner() }
+            )
+
             val loadError = bankLoadError
             if (loadError != null) {
               Surface(

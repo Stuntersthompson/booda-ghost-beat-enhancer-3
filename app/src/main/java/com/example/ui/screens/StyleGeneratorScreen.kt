@@ -43,6 +43,7 @@ import com.example.data.model.CuratedSunoPrompt
 import com.example.data.model.JobType
 import com.example.data.model.SUNO_STYLE_BOX_LIMIT
 import com.example.data.repository.CuratedPrompts
+import com.example.data.repository.HistoryImportMode
 import com.example.ui.components.RecentPromptsHistoryCard
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
@@ -64,11 +65,15 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
   val searchQuery by viewModel.curatedSearchQuery.collectAsStateWithLifecycle()
   val recentHistory by viewModel.recentPromptHistory.collectAsStateWithLifecycle()
 
+  var pendingExportIncludeSnapshot by rememberSaveable { mutableStateOf(true) }
+  var pendingImportMode by rememberSaveable { mutableStateOf(HistoryImportMode.MERGE) }
+  var pendingImportRestoreSnapshot by rememberSaveable { mutableStateOf(true) }
+
   val exportHistoryLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.CreateDocument("application/json")
   ) { uri: Uri? ->
     if (uri != null) {
-      viewModel.exportPromptHistoryToUri(context, uri, includeSnapshot = true)
+      viewModel.exportPromptHistoryToUri(context, uri, includeSnapshot = pendingExportIncludeSnapshot)
     }
   }
 
@@ -76,7 +81,12 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
     contract = ActivityResultContracts.OpenDocument()
   ) { uri: Uri? ->
     if (uri != null) {
-      viewModel.importPromptHistoryFromUri(context, uri, restoreSnapshot = true)
+      viewModel.importPromptHistoryFromUri(
+        context = context,
+        uri = uri,
+        restoreSnapshot = pendingImportRestoreSnapshot,
+        mode = pendingImportMode
+      )
     }
   }
 
@@ -719,12 +729,22 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
               },
               onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
               onClearAll = { viewModel.clearPromptHistory() },
-              onExportBackupFile = { exportHistoryLauncher.launch("booda_prompt_history.json") },
-              onCopyBackupJson = { viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = true) },
-              onImportBackupFile = { importHistoryLauncher.launch(arrayOf("application/json", "text/plain")) },
-              onImportBackupJson = { json, restore ->
-                viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore)
-              }
+              onExportBackupFile = { includeSnap ->
+                pendingExportIncludeSnapshot = includeSnap
+                exportHistoryLauncher.launch("booda_prompt_history.json")
+              },
+              onCopyBackupJson = { includeSnap ->
+                viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = includeSnap)
+              },
+              onImportBackupFile = { mode, restoreSnap ->
+                pendingImportMode = mode
+                pendingImportRestoreSnapshot = restoreSnap
+                importHistoryLauncher.launch(arrayOf("application/json", "text/plain"))
+              },
+              onImportBackupJson = { json, mode, restore ->
+                viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore, mode = mode)
+              },
+              validateSchema = viewModel::validateHistoryBackupSchema
             )
           }
         }
@@ -783,12 +803,22 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
             },
             onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
             onClearAll = { viewModel.clearPromptHistory() },
-            onExportBackupFile = { exportHistoryLauncher.launch("booda_prompt_history.json") },
-            onCopyBackupJson = { viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = true) },
-            onImportBackupFile = { importHistoryLauncher.launch(arrayOf("application/json", "text/plain")) },
-            onImportBackupJson = { json, restore ->
-              viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore)
-            }
+            onExportBackupFile = { includeSnap ->
+              pendingExportIncludeSnapshot = includeSnap
+              exportHistoryLauncher.launch("booda_prompt_history.json")
+            },
+            onCopyBackupJson = { includeSnap ->
+              viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = includeSnap)
+            },
+            onImportBackupFile = { mode, restoreSnap ->
+              pendingImportMode = mode
+              pendingImportRestoreSnapshot = restoreSnap
+              importHistoryLauncher.launch(arrayOf("application/json", "text/plain"))
+            },
+            onImportBackupJson = { json, mode, restore ->
+              viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore, mode = mode)
+            },
+            validateSchema = viewModel::validateHistoryBackupSchema
           )
         }
         if (filteredPrompts.isEmpty()) {

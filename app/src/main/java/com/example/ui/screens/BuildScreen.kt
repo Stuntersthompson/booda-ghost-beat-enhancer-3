@@ -33,12 +33,17 @@ import com.example.ai.TranscriptionTarget
 import com.example.ai.TranscriptionUiState
 import com.example.audio.PlaybackMath
 import com.example.data.model.*
+import com.example.data.repository.HistoryImportMode
+import com.example.ui.components.BeatIntensityCanvasMeter
 import com.example.ui.components.CompactWaveformMeter
 import com.example.ui.components.PromptBox
+import com.example.ui.components.QuickTemplatesBar
 import com.example.ui.components.RecentPromptsHistoryCard
+import com.example.ui.components.SaveTemplateDialog
 import com.example.ui.components.SettingsCardView
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
+import com.example.viewmodel.StudioTab
 
 @Composable
 fun BuildScreen(viewModel: MainViewModel) {
@@ -69,20 +74,26 @@ fun BuildScreen(viewModel: MainViewModel) {
   val isScrubbingAudio by viewModel.isScrubbingAudio.collectAsStateWithLifecycle()
   val handoffStepsDone by viewModel.handoffStepsDone.collectAsStateWithLifecycle()
   val recentHistory by viewModel.recentPromptHistory.collectAsStateWithLifecycle()
+  val promptTemplates by viewModel.promptTemplates.collectAsStateWithLifecycle()
+  val beatMeterSnapshot by viewModel.beatMeterSnapshot.collectAsStateWithLifecycle()
   val micTranscriptionState by viewModel.micTranscriptionState.collectAsStateWithLifecycle()
   val micPermissionDenied by viewModel.micPermissionDenied.collectAsStateWithLifecycle()
 
   var showSaveModal by rememberSaveable { mutableStateOf(false) }
+  var showSaveTemplateModal by rememberSaveable { mutableStateOf(false) }
   var takeNameInput by rememberSaveable { mutableStateOf("") }
   var beatTitleInput by rememberSaveable { mutableStateOf("") }
   var showExcludeDropdown by remember { mutableStateOf(false) }
   var pendingTranscriptionTarget by rememberSaveable { mutableStateOf(TranscriptionTarget.BUILD_LYRICS) }
+  var pendingExportIncludeSnapshot by rememberSaveable { mutableStateOf(true) }
+  var pendingImportMode by rememberSaveable { mutableStateOf(HistoryImportMode.MERGE) }
+  var pendingImportRestoreSnapshot by rememberSaveable { mutableStateOf(true) }
 
   val exportHistoryLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.CreateDocument("application/json")
   ) { uri: Uri? ->
     if (uri != null) {
-      viewModel.exportPromptHistoryToUri(context, uri, includeSnapshot = true)
+      viewModel.exportPromptHistoryToUri(context, uri, includeSnapshot = pendingExportIncludeSnapshot)
     }
   }
 
@@ -90,7 +101,12 @@ fun BuildScreen(viewModel: MainViewModel) {
     contract = ActivityResultContracts.OpenDocument()
   ) { uri: Uri? ->
     if (uri != null) {
-      viewModel.importPromptHistoryFromUri(context, uri, restoreSnapshot = true)
+      viewModel.importPromptHistoryFromUri(
+        context = context,
+        uri = uri,
+        restoreSnapshot = pendingImportRestoreSnapshot,
+        mode = pendingImportMode
+      )
     }
   }
 
@@ -240,8 +256,28 @@ fun BuildScreen(viewModel: MainViewModel) {
             color = TextMuted
           )
         }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        BeatIntensityCanvasMeter(
+          snapshot = beatMeterSnapshot,
+          sensitivity = sensitivityState.value,
+          peakHoldEnabled = peakHoldState.value,
+          isLiveAudio = isPlayingAudio || isRecording
+        )
       }
     }
+  }
+
+  val quickTemplatesSection: @Composable () -> Unit = {
+    QuickTemplatesBar(
+      templates = promptTemplates,
+      onApplyTemplate = { template ->
+        viewModel.applyPromptTemplate(template, context = context, switchToBuild = false)
+      },
+      onSaveCurrentClick = { showSaveTemplateModal = true },
+      onBrowseAllClick = { viewModel.setTab(StudioTab.LIBRARY) }
+    )
   }
 
   val quickActionsRow: @Composable () -> Unit = {
@@ -543,6 +579,7 @@ fun BuildScreen(viewModel: MainViewModel) {
           verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
           item { monitorCard() }
+          item { quickTemplatesSection() }
           item { quickActionsRow() }
           item {
             SettingsCardView(
@@ -580,12 +617,22 @@ fun BuildScreen(viewModel: MainViewModel) {
               },
               onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
               onClearAll = { viewModel.clearPromptHistory() },
-              onExportBackupFile = { exportHistoryLauncher.launch("booda_prompt_history.json") },
-              onCopyBackupJson = { viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = true) },
-              onImportBackupFile = { importHistoryLauncher.launch(arrayOf("application/json", "text/plain")) },
-              onImportBackupJson = { json, restore ->
-                viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore)
-              }
+              onExportBackupFile = { includeSnap ->
+                pendingExportIncludeSnapshot = includeSnap
+                exportHistoryLauncher.launch("booda_prompt_history.json")
+              },
+              onCopyBackupJson = { includeSnap ->
+                viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = includeSnap)
+              },
+              onImportBackupFile = { mode, restoreSnap ->
+                pendingImportMode = mode
+                pendingImportRestoreSnapshot = restoreSnap
+                importHistoryLauncher.launch(arrayOf("application/json", "text/plain"))
+              },
+              onImportBackupJson = { json, mode, restore ->
+                viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore, mode = mode)
+              },
+              validateSchema = viewModel::validateHistoryBackupSchema
             )
           }
           item {
@@ -658,11 +705,13 @@ fun BuildScreen(viewModel: MainViewModel) {
       LazyColumn(
         modifier = Modifier
           .fillMaxSize()
-          .padding(horizontal = 14.dp),
+          .padding(horizontal = 14.dp)
+          .testTag("build_list"),
         contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
       ) {
         item { monitorCard() }
+        item { quickTemplatesSection() }
         item { quickActionsRow() }
         item { voiceDictationCard() }
         item {
@@ -676,12 +725,22 @@ fun BuildScreen(viewModel: MainViewModel) {
             },
             onDeleteEntry = { id -> viewModel.deletePromptHistoryEntry(id) },
             onClearAll = { viewModel.clearPromptHistory() },
-            onExportBackupFile = { exportHistoryLauncher.launch("booda_prompt_history.json") },
-            onCopyBackupJson = { viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = true) },
-            onImportBackupFile = { importHistoryLauncher.launch(arrayOf("application/json", "text/plain")) },
-            onImportBackupJson = { json, restore ->
-              viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore)
-            }
+            onExportBackupFile = { includeSnap ->
+              pendingExportIncludeSnapshot = includeSnap
+              exportHistoryLauncher.launch("booda_prompt_history.json")
+            },
+            onCopyBackupJson = { includeSnap ->
+              viewModel.copyPromptHistoryToClipboard(context, includeSnapshot = includeSnap)
+            },
+            onImportBackupFile = { mode, restoreSnap ->
+              pendingImportMode = mode
+              pendingImportRestoreSnapshot = restoreSnap
+              importHistoryLauncher.launch(arrayOf("application/json", "text/plain"))
+            },
+            onImportBackupJson = { json, mode, restore ->
+              viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore, mode = mode)
+            },
+            validateSchema = viewModel::validateHistoryBackupSchema
           )
         }
         item {
@@ -819,6 +878,29 @@ fun BuildScreen(viewModel: MainViewModel) {
         }
       },
       containerColor = StudioCardElevated
+    )
+  }
+
+  if (showSaveTemplateModal) {
+    val defaultBpm = audioAnalysis?.bpm?.let { "${it.toInt()} BPM" } ?: ""
+    val defaultCat = when {
+      activeLane.contains("lo-fi", ignoreCase = true) || activeLane.contains("jazz", ignoreCase = true) -> "Lo-Fi Hip Hop"
+      activeLane.contains("dark", ignoreCase = true) || activeLane.contains("phonk", ignoreCase = true) -> "Dark Synthwave"
+      activeLane.contains("drill", ignoreCase = true) -> "UK Drill"
+      activeLane.contains("boom bap", ignoreCase = true) -> "Boom Bap"
+      activeLane.contains("afro", ignoreCase = true) -> "Afro-Trap"
+      activeLane.contains("trap", ignoreCase = true) -> "Trap"
+      else -> "Custom"
+    }
+    SaveTemplateDialog(
+      defaultTitle = "$activeLane Preset",
+      defaultCategory = defaultCat,
+      defaultBpmHint = defaultBpm,
+      onDismiss = { showSaveTemplateModal = false },
+      onSave = { title, category, bpmHint ->
+        viewModel.saveCurrentAsTemplate(title = title, category = category, bpmHint = bpmHint, context = context)
+        showSaveTemplateModal = false
+      }
     )
   }
 }

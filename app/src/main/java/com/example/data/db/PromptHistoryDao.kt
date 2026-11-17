@@ -36,6 +36,33 @@ interface PromptHistoryDao {
     return insertedId
   }
 
+  @Transaction
+  suspend fun mergeHistoryAndKeepLatest(
+    entries: List<PromptHistoryEntity>,
+    maxCount: Int = MAX_HISTORY_ENTRIES
+  ) {
+    val ordered = entries.sortedBy { it.createdAt }
+    for (entry in ordered) {
+      deleteByPromptText(entry.prompt)
+      insertPrompt(entry)
+    }
+    pruneOldestBeyond(maxCount)
+  }
+
+  @Transaction
+  suspend fun replaceHistoryAndKeepLatest(
+    entries: List<PromptHistoryEntity>,
+    maxCount: Int = MAX_HISTORY_ENTRIES
+  ) {
+    clearAll()
+    val ordered = entries.sortedBy { it.createdAt }
+    for (entry in ordered) {
+      deleteByPromptText(entry.prompt)
+      insertPrompt(entry)
+    }
+    pruneOldestBeyond(maxCount)
+  }
+
   @Query("DELETE FROM prompt_history WHERE id = :id")
   suspend fun deleteById(id: Long)
 

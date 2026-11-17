@@ -698,38 +698,46 @@ class ExampleUnitTest {
   }
 
   @Test
-  fun test_compliance_snapshot_json_roundtrip_and_malformed_handling() {
-    val original = ComplianceSnapshot(
-      jobType = JobType.PRESERVE,
-      stylePrompt = "$LOCK_LINE. Add Trap drums.",
-      lyricsMap = "[Intro]\n[End]",
-      excludeText = "no vocals",
-      variety = 0,
-      weirdness = 25,
-      styleInfluence = 70,
-      audioInfluence = 82,
-      fixSummary = "Calibrated sliders"
+  fun test_global_connectivity_state_tracks_firebase_and_gemini_separately() {
+    val healthy = com.example.viewmodel.GlobalConnectivityState()
+    assertTrue(healthy.isFirebaseReachable)
+    assertTrue(healthy.isGeminiReachable)
+    assertFalse(healthy.hasUnreachableService)
+    assertFalse(healthy.shouldShowBanner)
+
+    // Firebase unreachable while Gemini healthy
+    val firebaseOnlyDown = healthy.copy(
+      firebaseHealth = com.example.viewmodel.FirebaseHealthStatus.UNREACHABLE,
+      geminiHealth = com.example.viewmodel.GeminiHealthStatus.HEALTHY
     )
+    assertFalse(firebaseOnlyDown.isFirebaseReachable)
+    assertTrue(firebaseOnlyDown.isGeminiReachable)
+    assertTrue(firebaseOnlyDown.hasUnreachableService)
+    assertTrue(firebaseOnlyDown.shouldShowBanner)
 
-    val parsed = ComplianceSnapshot.fromJson(original.toJson())
-    assertNotNull(parsed)
-    assertEquals(original, parsed)
+    // Gemini timed out while Firebase healthy
+    val geminiOnlyDown = healthy.copy(
+      firebaseHealth = com.example.viewmodel.FirebaseHealthStatus.HEALTHY,
+      geminiHealth = com.example.viewmodel.GeminiHealthStatus.TIMED_OUT
+    )
+    assertTrue(geminiOnlyDown.isFirebaseReachable)
+    assertFalse(geminiOnlyDown.isGeminiReachable)
+    assertTrue(geminiOnlyDown.hasUnreachableService)
+    assertTrue(geminiOnlyDown.shouldShowBanner)
 
-    // Out-of-range numeric fields in malformed JSON should clamp safely
-    val clampedJson = """
-      {"jobType":"create","stylePrompt":"Trap beat","lyricsMap":"[End]","excludeText":"","variety":999,"weirdness":-10,"styleInfluence":150,"audioInfluence":-4}
-    """.trimIndent()
-    val clamped = ComplianceSnapshot.fromJson(clampedJson)
-    assertNotNull(clamped)
-    assertEquals(JobType.CREATE, clamped!!.jobType)
-    assertEquals(100, clamped.variety)
-    assertEquals(0, clamped.weirdness)
-    assertEquals(100, clamped.styleInfluence)
-    assertEquals(0, clamped.audioInfluence)
+    // Dismissed banner suppresses visual display while preserving health flags
+    val dismissed = geminiOnlyDown.copy(isBannerDismissed = true)
+    assertTrue(dismissed.hasUnreachableService)
+    assertFalse(dismissed.shouldShowBanner)
 
-    // Garbage / null inputs return null cleanly
-    assertNull(ComplianceSnapshot.fromJson(null))
-    assertNull(ComplianceSnapshot.fromJson(""))
-    assertNull(ComplianceSnapshot.fromJson("not-json"))
+    // Offline marks both unreachable
+    val offline = healthy.copy(
+      isNetworkOnline = false,
+      firebaseHealth = com.example.viewmodel.FirebaseHealthStatus.OFFLINE,
+      geminiHealth = com.example.viewmodel.GeminiHealthStatus.OFFLINE
+    )
+    assertFalse(offline.isFirebaseReachable)
+    assertFalse(offline.isGeminiReachable)
+    assertTrue(offline.shouldShowBanner)
   }
 }

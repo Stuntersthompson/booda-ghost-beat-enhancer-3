@@ -1,17 +1,29 @@
 package com.example
 
 import android.app.Application
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.SavedStateHandle
@@ -29,6 +41,7 @@ import com.example.data.model.LOCK_LINE
 import com.example.data.model.STYLE_LIMIT
 import com.example.data.model.TakeEntity
 import com.example.data.repository.FavoriteRepository
+import com.example.data.repository.HistoryImportMode
 import com.example.data.repository.PromptHistoryRepository
 import com.example.data.repository.TakeRepository
 import com.example.ui.components.RecentPromptsHistoryCard
@@ -39,6 +52,10 @@ import com.example.ui.screens.SimpleScreen
 import com.example.ui.screens.TakesScreen
 import com.example.ui.theme.BooDaBeatTheme
 import com.example.viewmodel.EnvironmentStatus
+import com.example.viewmodel.FailedCloudRequestType
+import com.example.viewmodel.FirebaseHealthStatus
+import com.example.viewmodel.GeminiHealthStatus
+import com.example.viewmodel.GlobalConnectivityState
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.StudioTab
 import kotlinx.coroutines.flow.first
@@ -93,7 +110,7 @@ class QaRegressionRobolectricTest {
     val saved = SavedStateHandle(
       mapOf(
         "studio_tab" to StudioTab.ADVISOR.name,
-        "job_type" to JobType.CREATE.value,
+        "job_type" to JobType.ORIGINAL.value,
         "active_lane" to "Boom bap",
         "style_prompt" to "Restored Boom bap style prompt",
         "lyrics_map" to "[Intro]\n[Verse 1]\n[End]",
@@ -116,7 +133,7 @@ class QaRegressionRobolectricTest {
 
     val vm = MainViewModel(app, saved)
     assertEquals(StudioTab.ADVISOR, vm.currentTab.value)
-    assertEquals(JobType.CREATE, vm.jobType.value)
+    assertEquals(JobType.ORIGINAL, vm.jobType.value)
     assertEquals("Boom bap", vm.activeLane.value)
     assertEquals("Restored Boom bap style prompt", vm.stylePrompt.value)
     assertEquals("[Intro]\n[Verse 1]\n[End]", vm.lyricsMap.value)
@@ -150,7 +167,7 @@ class QaRegressionRobolectricTest {
       prompt = "Drift phonk cowbell drive at 150 BPM.",
       source = "Randomize",
       lane = "Drift phonk",
-      jobType = JobType.CREATE,
+      jobType = JobType.ORIGINAL,
       bpm = 150
     )
 
@@ -212,7 +229,7 @@ class QaRegressionRobolectricTest {
       for (i in 1..30) put("Prompt variation #$i with Trap drums")
     }.toString()
     val bulkRes = historyRepo.importHistoryJson(arrayJson)
-    assertEquals(30, bulkRes.importedCount)
+    assertEquals(PromptHistoryRepository.MAX_HISTORY_COUNT, bulkRes.importedCount)
     assertEquals(PromptHistoryRepository.MAX_HISTORY_COUNT, historyRepo.getCount())
   }
 
@@ -384,10 +401,15 @@ class QaRegressionRobolectricTest {
   @Test
   fun testAnalyzeAndBuildErrorAndMicDeniedBannersDisplayAndDismiss() {
     val vm = MainViewModel(app)
+    var showBuildScreen by androidx.compose.runtime.mutableStateOf(false)
 
     composeTestRule.setContent {
       BooDaBeatTheme {
-        AnalyzeScreen(viewModel = vm)
+        if (showBuildScreen) {
+          BuildScreen(viewModel = vm)
+        } else {
+          AnalyzeScreen(viewModel = vm)
+        }
       }
     }
     composeTestRule.waitForIdle()
@@ -407,13 +429,11 @@ class QaRegressionRobolectricTest {
     composeTestRule.onNodeWithTag("analyze_audio_error_banner").assertDoesNotExist()
     composeTestRule.onNodeWithTag("mic_permission_denied_banner").assertDoesNotExist()
 
-    // Also confirm BuildScreen displays & dismisses the mic denied banner
+    // Switch to BuildScreen inside the same setContent host & verify mic denied banner displays & dismisses
     vm.onMicrophonePermissionResult(false)
-    composeTestRule.setContent {
-      BooDaBeatTheme {
-        BuildScreen(viewModel = vm)
-      }
-    }
+    showBuildScreen = true
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("build_list").performScrollToNode(hasTestTag("mic_permission_denied_banner"))
     composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("mic_permission_denied_banner").assertIsDisplayed()
     composeTestRule.onNodeWithTag("action_dismiss_mic_denied").performClick()
@@ -422,11 +442,13 @@ class QaRegressionRobolectricTest {
   }
 
   @Test
-  fun testRecentPromptsHistoryCardBackupActionsAndClipboardPasteImport() {
-    var exportedFileTriggered = false
-    var copiedJsonTriggered = false
-    var importFileTriggered = false
+  fun testRecentPromptsHistoryCardBackupSheetSchemaMergeReplaceAndAccessibility() {
+    var exportedIncludeSnap: Boolean? = null
+    var copiedIncludeSnap: Boolean? = null
+    var importFileMode: HistoryImportMode? = null
+    var importFileRestoreSnap: Boolean? = null
     var pastedJsonArg: String? = null
+    var pastedModeArg: HistoryImportMode? = null
     var restoreSnapshotArg: Boolean? = null
 
     composeTestRule.setContent {
@@ -437,11 +459,15 @@ class QaRegressionRobolectricTest {
           onCopyPrompt = {},
           onDeleteEntry = {},
           onClearAll = {},
-          onExportBackupFile = { exportedFileTriggered = true },
-          onCopyBackupJson = { copiedJsonTriggered = true },
-          onImportBackupFile = { importFileTriggered = true },
-          onImportBackupJson = { json, restoreSnap ->
+          onExportBackupFile = { includeSnap -> exportedIncludeSnap = includeSnap },
+          onCopyBackupJson = { includeSnap -> copiedIncludeSnap = includeSnap },
+          onImportBackupFile = { mode, restoreSnap ->
+            importFileMode = mode
+            importFileRestoreSnap = restoreSnap
+          },
+          onImportBackupJson = { json, mode, restoreSnap ->
             pastedJsonArg = json
+            pastedModeArg = mode
             restoreSnapshotArg = restoreSnap
           }
         )
@@ -449,78 +475,145 @@ class QaRegressionRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
-    composeTestRule.onNodeWithTag("action_export_history_file").assertIsDisplayed().performClick()
-    composeTestRule.onNodeWithTag("action_copy_history_json").assertIsDisplayed().performClick()
-    composeTestRule.onNodeWithTag("action_import_history_file").assertIsDisplayed().performClick()
-    assertTrue(exportedFileTriggered)
-    assertTrue(copiedJsonTriggered)
-    assertTrue(importFileTriggered)
-
-    composeTestRule.onNodeWithTag("action_paste_history_json").assertIsDisplayed().performClick()
+    // Single Backup & Sync button with >= 48.dp target & TalkBack description replaces inline buttons
+    val openSheetBtn = composeTestRule.onNodeWithTag("action_open_history_sheet")
+    openSheetBtn.assertIsDisplayed()
+    openSheetBtn.assertHeightIsAtLeast(48.dp)
+    assertFalse(
+      openSheetBtn.fetchSemanticsNode().config.getOrElse(SemanticsProperties.ContentDescription) { emptyList() }.isEmpty()
+    )
+    openSheetBtn.performClick()
     composeTestRule.waitForIdle()
 
-    composeTestRule.onNodeWithTag("dialog_import_history_json").assertIsDisplayed()
-    val payload = """{"entries":[{"prompt":"Restored Trap Groove"}]}"""
-    composeTestRule.onNodeWithTag("input_import_history_json").performTextInput(payload)
-    composeTestRule.onNodeWithTag("action_confirm_import_history").performClick()
+    composeTestRule.onNodeWithTag("history_backup_bottom_sheet").assertIsDisplayed()
+
+    // Default import mode is Merge
+    val mergeRadio = composeTestRule.onNodeWithTag("radio_import_mode_merge")
+    val replaceRadio = composeTestRule.onNodeWithTag("radio_import_mode_replace")
+    mergeRadio.assertHeightIsAtLeast(48.dp).assertIsSelected()
+    replaceRadio.assertHeightIsAtLeast(48.dp).assertIsNotSelected()
+
+    // Export actions inside sheet (each dismisses the sheet after dispatching its action)
+    composeTestRule.onNodeWithTag("action_sheet_export_file")
+      .performScrollTo()
+      .assertIsDisplayed()
+      .assertHeightIsAtLeast(48.dp)
+      .performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(true, exportedIncludeSnap)
+
+    // Re-open sheet to trigger Copy JSON
+    openSheetBtn.performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("action_sheet_copy_json")
+      .performScrollTo()
+      .assertIsDisplayed()
+      .assertHeightIsAtLeast(48.dp)
+      .performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(true, copiedIncludeSnap)
+
+    // Re-open sheet for Merge/Replace, schema validation, and Paste JSON import
+    openSheetBtn.performClick()
     composeTestRule.waitForIdle()
 
-    assertEquals(payload, pastedJsonArg)
+    composeTestRule.onNodeWithTag("action_sheet_toggle_paste")
+      .performScrollTo()
+      .assertIsDisplayed()
+      .assertHeightIsAtLeast(48.dp)
+      .performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("sheet_paste_json_section").performScrollTo().assertIsDisplayed()
+    val inputNode = composeTestRule.onNodeWithTag("input_import_history_json")
+    inputNode.performScrollTo().performTextInput("{bad_json")
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("sheet_schema_status_error").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("action_confirm_import_history").performScrollTo().assertIsNotEnabled()
+
+    // Switch to Replace mode and enter valid v1 schema JSON
+    replaceRadio.performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    replaceRadio.assertIsSelected()
+
+    inputNode.performScrollTo().performTextClearance()
+    val validPayload = """{"kind":"booda-prompt-history","version":1,"entries":[{"prompt":"Restored Trap Groove"}]}"""
+    inputNode.performTextInput(validPayload)
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("sheet_schema_status_valid").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("action_confirm_import_history")
+      .performScrollTo()
+      .assertIsEnabled()
+      .assertHeightIsAtLeast(48.dp)
+      .performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(validPayload, pastedJsonArg)
+    assertEquals(HistoryImportMode.REPLACE, pastedModeArg)
     assertEquals(true, restoreSnapshotArg)
+
+    // Re-open sheet to test file picker import trigger forwards selected mode
+    openSheetBtn.performClick()
+    composeTestRule.waitForIdle()
+    mergeRadio.performScrollTo().performClick()
+    composeTestRule.onNodeWithTag("action_sheet_import_file")
+      .performScrollTo()
+      .assertHeightIsAtLeast(48.dp)
+      .performClick()
+    assertEquals(HistoryImportMode.MERGE, importFileMode)
+    assertEquals(true, importFileRestoreSnap)
   }
 
   @Test
-  fun testTabletWideTwoPaneLayoutsForSimpleLibraryAndTakes() = runBlocking {
-    val vm = MainViewModel(app)
-    vm.takeRepo.insertTake(
-      TakeEntity(
-        name = "Wide Pane Take",
-        beatTitle = "Wide Beat",
-        lane = "Trap",
-        bpm = 140.0,
-        style = "$LOCK_LINE. Heavy Trap drums.",
-        lyrics = "[End]",
-        excludeText = "no vocals",
-        settings = "Model v6",
-        result = "winner",
-        jobType = "preserve"
+  fun testTabletWideTwoPaneLayoutsForSimpleLibraryAndTakes() {
+    runBlocking {
+      val vm = MainViewModel(app)
+      vm.takeRepo.insertTake(
+        TakeEntity(
+          name = "Wide Pane Take",
+          beatTitle = "Wide Beat",
+          lane = "Trap",
+          bpm = 140.0,
+          style = "$LOCK_LINE. Heavy Trap drums.",
+          lyrics = "[End]",
+          excludeText = "no vocals",
+          settings = "Model v6",
+          result = "winner",
+          jobType = "preserve"
+        )
       )
-    )
-    Thread.sleep(100L)
+      Thread.sleep(100L)
 
-    // SimpleScreen wide 2-pane
-    composeTestRule.setContent {
-      BooDaBeatTheme {
-        Box(modifier = Modifier.requiredSize(900.dp, 800.dp)) {
-          SimpleScreen(viewModel = vm)
+      var screenIndex by mutableIntStateOf(0)
+      composeTestRule.setContent {
+        BooDaBeatTheme {
+          Box(modifier = Modifier.requiredSize(900.dp, 800.dp)) {
+            when (screenIndex) {
+              0 -> SimpleScreen(viewModel = vm)
+              1 -> LibraryScreen(viewModel = vm)
+              else -> TakesScreen(viewModel = vm)
+            }
+          }
         }
       }
-    }
-    composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithTag("simple_wide_layout").assertIsDisplayed()
 
-    // LibraryScreen wide 2-pane
-    composeTestRule.setContent {
-      BooDaBeatTheme {
-        Box(modifier = Modifier.requiredSize(900.dp, 800.dp)) {
-          LibraryScreen(viewModel = vm)
-        }
-      }
-    }
-    composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithTag("library_wide_layout").assertIsDisplayed()
+      // SimpleScreen wide 2-pane
+      composeTestRule.waitForIdle()
+      composeTestRule.onNodeWithTag("simple_wide_layout").assertIsDisplayed()
 
-    // TakesScreen wide 2-pane
-    composeTestRule.setContent {
-      BooDaBeatTheme {
-        Box(modifier = Modifier.requiredSize(900.dp, 800.dp)) {
-          TakesScreen(viewModel = vm)
-        }
-      }
+      // LibraryScreen wide 2-pane
+      screenIndex = 1
+      composeTestRule.waitForIdle()
+      composeTestRule.onNodeWithTag("library_wide_layout").assertIsDisplayed()
+
+      // TakesScreen wide 2-pane
+      screenIndex = 2
+      composeTestRule.waitForIdle()
+      composeTestRule.onNodeWithTag("takes_wide_layout").assertIsDisplayed()
+      composeTestRule.onNodeWithTag("takes_list").assertIsDisplayed()
     }
-    composeTestRule.waitForIdle()
-    composeTestRule.onNodeWithTag("takes_wide_layout").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("takes_list").assertIsDisplayed()
   }
 
   @Test
@@ -537,6 +630,7 @@ class QaRegressionRobolectricTest {
 
     val requested = pkgInfo.requestedPermissions?.toSet() ?: emptySet()
     assertTrue(requested.contains(android.Manifest.permission.INTERNET))
+    assertTrue(requested.contains(android.Manifest.permission.ACCESS_NETWORK_STATE))
     assertTrue(requested.contains(android.Manifest.permission.RECORD_AUDIO))
     assertFalse(requested.contains("android.permission.READ_EXTERNAL_STORAGE"))
     assertFalse(requested.contains("android.permission.WRITE_EXTERNAL_STORAGE"))
@@ -544,5 +638,261 @@ class QaRegressionRobolectricTest {
     assertFalse(requested.contains("android.permission.READ_MEDIA_IMAGES"))
     assertFalse(requested.contains("android.permission.MANAGE_EXTERNAL_STORAGE"))
     assertFalse(requested.contains("android.permission.REQUEST_INSTALL_PACKAGES"))
+  }
+
+  @Test
+  fun testPromptHistoryMergeDeduplicatesAndCaps20AndReplaceOverwrites() = runBlocking {
+    val historyRepo = PromptHistoryRepository(database.promptHistoryDao())
+    val baseTs = 1_700_000_000_000L
+
+    // Seed 15 existing entries
+    for (i in 1..15) {
+      historyRepo.recordPrompt(
+        prompt = "Existing prompt #$i",
+        source = "Builder",
+        lane = "Trap",
+        createdAt = baseTs + i * 1000L
+      )
+    }
+    assertEquals(15, historyRepo.getCount())
+
+    // Build backup with 5 overlapping prompts (newer timestamp) + 10 brand new prompts
+    val mergeEntries = org.json.JSONArray().apply {
+      for (i in 1..5) {
+        put(org.json.JSONObject().apply {
+          put("prompt", "Existing prompt #$i")
+          put("source", "Backup")
+          put("lane", "Trap")
+          put("createdAt", baseTs + 50_000L + i * 1000L)
+        })
+      }
+      for (i in 16..25) {
+        put(org.json.JSONObject().apply {
+          put("prompt", "Merged new prompt #$i")
+          put("source", "Backup")
+          put("lane", "Boom bap")
+          put("createdAt", baseTs + 60_000L + i * 1000L)
+        })
+      }
+    }
+    val mergePayload = org.json.JSONObject().apply {
+      put("kind", PromptHistoryRepository.EXPECTED_BACKUP_KIND)
+      put("version", PromptHistoryRepository.SUPPORTED_SCHEMA_VERSION)
+      put("entries", mergeEntries)
+    }.toString()
+
+    val mergeRes = historyRepo.importHistoryJson(mergePayload, mode = HistoryImportMode.MERGE)
+    assertNull(mergeRes.errorMessage)
+    val mergedList = historyRepo.getRecentSnapshot()
+    // 15 existing + 10 new unique = 25 unique -> capped cleanly at 20 newest deduplicated items
+    assertEquals(PromptHistoryRepository.MAX_HISTORY_COUNT, mergedList.size)
+    assertEquals(mergedList.map { it.prompt }.distinct().size, mergedList.size)
+    assertTrue(mergedList.any { it.prompt == "Merged new prompt #25" })
+
+    // Replace mode overwrites all 20 previous entries with strictly the 2 imported items
+    val replacePayload = """
+      {
+        "kind": "booda-prompt-history",
+        "version": 1,
+        "entries": [
+          {"prompt": "Clean Replace Alpha", "lane": "NY drill"},
+          {"prompt": "Clean Replace Beta", "lane": "Gospel Trap"}
+        ]
+      }
+    """.trimIndent()
+    val replaceRes = historyRepo.importHistoryJson(replacePayload, mode = HistoryImportMode.REPLACE)
+    assertNull(replaceRes.errorMessage)
+    assertEquals(2, replaceRes.importedCount)
+    val afterReplace = historyRepo.getRecentSnapshot()
+    assertEquals(2, afterReplace.size)
+    assertEquals(setOf("Clean Replace Alpha", "Clean Replace Beta"), afterReplace.map { it.prompt }.toSet())
+  }
+
+  @Test
+  fun testGlobalConnectivitySeparateHealthTrackingNetworkTransitionsAndRetry() {
+    val vm = MainViewModel(app)
+    vm.environmentStatusProvider = { EnvironmentStatus(isOnline = true, isFirebaseReady = true) }
+
+    // 1. Live network transition offline -> online recovers cleanly
+    vm.updateConnectivityOnNetworkChange(isOnline = false)
+    val offlineState = vm.connectivityState.value
+    assertFalse(offlineState.isNetworkOnline)
+    assertEquals(FirebaseHealthStatus.OFFLINE, offlineState.firebaseHealth)
+    assertEquals(GeminiHealthStatus.OFFLINE, offlineState.geminiHealth)
+    assertTrue(offlineState.shouldShowBanner)
+
+    // Offline studio workflows continue uninterrupted
+    vm.setLane("Boom bap")
+    assertEquals("Boom bap", vm.activeLane.value)
+    assertTrue(vm.stylePrompt.value.contains("Boom bap"))
+
+    vm.updateConnectivityOnNetworkChange(isOnline = true)
+    val recoveredState = vm.connectivityState.value
+    assertTrue(recoveredState.isNetworkOnline)
+    assertEquals(FirebaseHealthStatus.HEALTHY, recoveredState.firebaseHealth)
+    assertEquals(GeminiHealthStatus.HEALTHY, recoveredState.geminiHealth)
+    assertFalse(recoveredState.shouldShowBanner)
+
+    // 2. Firebase unreachable while Gemini healthy tracks separately and stores failed request
+    vm.environmentStatusProvider = { EnvironmentStatus(isOnline = true, isFirebaseReady = false) }
+    vm.searchSunoKnowledge("Suno v6 bass locking")
+    val fbDownState = vm.connectivityState.value
+    assertEquals(FirebaseHealthStatus.UNREACHABLE, fbDownState.firebaseHealth)
+    assertEquals(GeminiHealthStatus.HEALTHY, fbDownState.geminiHealth)
+    assertEquals(FailedCloudRequestType.SEARCH_GROUNDING, fbDownState.lastFailedRequest)
+    assertTrue(fbDownState.shouldShowBanner)
+
+    // 3. Re-probe Firebase healthy and tap Retry re-initializes last failed request cleanly
+    vm.environmentStatusProvider = { EnvironmentStatus(isOnline = true, isFirebaseReady = true) }
+    vm.retryConnectionAndLastRequest()
+    // After synchronous preflight re-probe succeeds, Search Grounding was re-launched (Loading or Error if Firebase endpoint absent in JVM)
+    assertTrue(
+      vm.searchGroundingState.value is SearchGroundingUiState.Loading ||
+        vm.searchGroundingState.value is SearchGroundingUiState.Error ||
+        vm.searchGroundingState.value is SearchGroundingUiState.Success
+    )
+  }
+
+  @Test
+  fun testMainAppContentConnectivityBannerDisplaysPillsRetryAndDismissWithTouchTargets() {
+    val vm = MainViewModel(app)
+    vm.environmentStatusProvider = { EnvironmentStatus(isOnline = true, isFirebaseReady = true) }
+    vm.reportConnectivityStateForTest(
+      GlobalConnectivityState(
+        isNetworkOnline = true,
+        firebaseHealth = FirebaseHealthStatus.UNREACHABLE,
+        geminiHealth = GeminiHealthStatus.TIMED_OUT,
+        lastErrorMessage = "Gemini timed out; Firebase App Check unreachable.",
+        lastFailedRequest = FailedCloudRequestType.SEARCH_GROUNDING,
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+    )
+
+    composeTestRule.setContent {
+      BooDaBeatTheme {
+        MainAppContent(vm)
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("global_connectivity_banner").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("connectivity_firebase_pill").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("connectivity_gemini_pill").assertIsDisplayed()
+
+    val retryBtn = composeTestRule.onNodeWithTag("action_retry_connectivity")
+    val dismissBtn = composeTestRule.onNodeWithTag("action_dismiss_connectivity_banner")
+    retryBtn.assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+    dismissBtn.assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+
+    // Dismiss hides banner while offline workflows remain intact
+    dismissBtn.performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("global_connectivity_banner").assertDoesNotExist()
+
+    // Re-surface error and tap Retry to re-probe
+    vm.reportConnectivityStateForTest(
+      GlobalConnectivityState(
+        isNetworkOnline = true,
+        firebaseHealth = FirebaseHealthStatus.UNREACHABLE,
+        geminiHealth = GeminiHealthStatus.HEALTHY,
+        lastErrorMessage = "Firebase App Check unavailable",
+        lastFailedRequest = FailedCloudRequestType.BEAT_CONSULTATION,
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+    )
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("global_connectivity_banner").assertIsDisplayed()
+    retryBtn.performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(vm.connectivityState.value.isFirebaseReachable)
+  }
+
+  @Test
+  fun testComplianceSnapshotJsonRoundtripAndMalformedHandling() {
+    val original = ComplianceSnapshot(
+      jobType = JobType.PRESERVE,
+      stylePrompt = "$LOCK_LINE. Add Trap drums.",
+      lyricsMap = "[Intro]\n[End]",
+      excludeText = "no vocals",
+      variety = 0,
+      weirdness = 25,
+      styleInfluence = 70,
+      audioInfluence = 82,
+      fixSummary = "Calibrated sliders"
+    )
+
+    val parsed = ComplianceSnapshot.fromJson(original.toJson())
+    assertNotNull(parsed)
+    assertEquals(original, parsed)
+
+    val clampedJson = """
+      {"jobType":"create","stylePrompt":"Trap beat","lyricsMap":"[End]","excludeText":"","variety":999,"weirdness":-10,"styleInfluence":150,"audioInfluence":-4}
+    """.trimIndent()
+    val clamped = ComplianceSnapshot.fromJson(clampedJson)
+    assertNotNull(clamped)
+    assertEquals(JobType.ORIGINAL, clamped!!.jobType)
+    assertEquals(100, clamped.variety)
+    assertEquals(0, clamped.weirdness)
+    assertEquals(100, clamped.styleInfluence)
+    assertEquals(0, clamped.audioInfluence)
+
+    assertNull(ComplianceSnapshot.fromJson(null))
+    assertNull(ComplianceSnapshot.fromJson(""))
+    assertNull(ComplianceSnapshot.fromJson("not-json"))
+  }
+
+  @Test
+  fun testPromptHistorySchemaValidationRulesAnd20Cap() {
+    val validEnvelope = """
+      {
+        "app": "BooDa Beat Enhancer",
+        "kind": "booda-prompt-history",
+        "version": 1,
+        "complianceSnapshot": {
+          "jobType": "preserve",
+          "stylePrompt": "$LOCK_LINE. Add Trap drums.",
+          "lyricsMap": "[End]",
+          "excludeText": "no vocals",
+          "variety": 0,
+          "weirdness": 25,
+          "styleInfluence": 70,
+          "audioInfluence": 80
+        },
+        "entries": [
+          { "prompt": "$LOCK_LINE. Trap 808 bounce.", "lane": "Trap", "bpm": 140 },
+          { "prompt": "   " }
+        ]
+      }
+    """.trimIndent()
+
+    val ok = PromptHistoryRepository.validateSchema(validEnvelope)
+    assertTrue(ok.isValid)
+    assertEquals(1, ok.entryCount)
+    assertEquals(1, ok.skippedCount)
+    assertTrue(ok.hasSnapshot)
+    assertNull(ok.errorMessage)
+
+    val wrongKind = PromptHistoryRepository.validateSchema(
+      """{"kind":"other-app","version":1,"entries":["Test"]}"""
+    )
+    assertFalse(wrongKind.isValid)
+    assertTrue(wrongKind.errorMessage!!.contains("kind", ignoreCase = true))
+
+    val badVersion = PromptHistoryRepository.validateSchema(
+      """{"kind":"booda-prompt-history","version":99,"entries":["Test"]}"""
+    )
+    assertFalse(badVersion.isValid)
+    assertTrue(badVersion.errorMessage!!.contains("version", ignoreCase = true))
+
+    val nonArrayEntries = PromptHistoryRepository.validateSchema(
+      """{"kind":"booda-prompt-history","version":1,"entries":"invalid"}"""
+    )
+    assertFalse(nonArrayEntries.isValid)
+    assertTrue(nonArrayEntries.errorMessage!!.contains("array", ignoreCase = true))
+
+    assertFalse(PromptHistoryRepository.validateSchema("").isValid)
+    assertFalse(PromptHistoryRepository.validateSchema("{not-json").isValid)
   }
 }

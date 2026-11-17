@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.widget.Toast
@@ -19,15 +20,21 @@ import com.example.ai.GeminiBeatService
 import com.example.ai.SearchGroundingUiState
 import com.example.ai.TranscriptionTarget
 import com.example.ai.TranscriptionUiState
+import com.example.ai.configureAppCheck
 import com.example.audio.AudioAnalysisResult
 import com.example.audio.AudioAnalyzer
 import com.example.audio.AudioRecorder
+import com.example.audio.BeatIntensityCalculator
+import com.example.audio.BeatMeterSnapshot
 import com.example.audio.StudioAudioPlayer
 import com.example.data.db.AppDatabase
 import com.example.data.model.*
 import com.example.data.repository.FavoriteRepository
+import com.example.data.repository.HistoryImportMode
+import com.example.data.repository.HistorySchemaValidationResult
 import com.example.data.repository.PromptBankRepository
 import com.example.data.repository.PromptHistoryRepository
+import com.example.data.repository.PromptTemplateRepository
 import com.example.data.repository.StudioPreferencesRepository
 import com.example.data.repository.TakeRepository
 import com.google.firebase.FirebaseApp
@@ -41,6 +48,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -73,6 +81,7 @@ class MainViewModel(
   val takeRepo = TakeRepository(database.takeDao())
   val favoriteRepo = FavoriteRepository(database.favoritePromptDao())
   val historyRepo = PromptHistoryRepository(database.promptHistoryDao())
+  val promptTemplateRepo = PromptTemplateRepository(database.promptTemplateDao())
   val preferencesRepo = StudioPreferencesRepository(application)
   private val audioAnalyzer = AudioAnalyzer(application)
   private val audioRecorder = AudioRecorder()
@@ -138,6 +147,19 @@ class MainViewModel(
   val recentPrompts: StateFlow<List<String>> = historyRepo.recentPrompts
     .map { entries -> entries.map { it.prompt } }
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+  // Room-backed Categorized Suno Prompt Templates
+  val promptTemplates: StateFlow<List<PromptTemplateEntity>> = promptTemplateRepo.allTemplates
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+  val templateCategories: StateFlow<List<String>> = promptTemplateRepo.categories
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+  private val _templateSearchQuery = MutableStateFlow(savedStateHandle.get<String>(KEY_TEMPLATE_QUERY) ?: "")
+  val templateSearchQuery: StateFlow<String> = _templateSearchQuery.asStateFlow()
+
+  private val _templateCategoryFilter = MutableStateFlow(savedStateHandle.get<String>(KEY_TEMPLATE_CATEGORY) ?: "All")
+  val templateCategoryFilter: StateFlow<String> = _templateCategoryFilter.asStateFlow()
 
   // Navigation
   private val _currentTab = MutableStateFlow(StudioTab.BUILD)
@@ -209,9 +231,16 @@ class MainViewModel(
   private val _searchGroundingState = MutableStateFlow<SearchGroundingUiState>(SearchGroundingUiState.Idle)
   val searchGroundingState: StateFlow<SearchGroundingUiState> = _searchGroundingState.asStateFlow()
 
+  private val _connectivityState = MutableStateFlow(GlobalConnectivityState())
+  val connectivityState: StateFlow<GlobalConnectivityState> = _connectivityState.asStateFlow()
+
   private var lastAnalyzedWavBytes: ByteArray? = null
   private var lastTranscriptionWavBytes: ByteArray? = null
   private var lastTranscriptionTarget: TranscriptionTarget = TranscriptionTarget.ANALYZE_SAMPLE_WORDS
+  private var lastSearchQuery: String = ""
+
+  private var connectivityManagerRef: ConnectivityManager? = null
+  private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
   private val _complianceUndoSnapshot = MutableStateFlow<ComplianceSnapshot?>(null)
   val complianceUndoSnapshot: StateFlow<ComplianceSnapshot?> = _complianceUndoSnapshot.asStateFlow()
@@ -242,6 +271,63 @@ class MainViewModel(
   private val _takeFilterResult = MutableStateFlow("ALL")
   val takeFilterResult: StateFlow<String> = _takeFilterResult.asStateFlow()
 
+  // Suno Handoff Checklist Tracking (Steps 1..5) — declared before init so restoreFromSavedState() never sees null
+  private val _handoffStepsDone = MutableStateFlow<Set<Int>>(emptySet())
+  val handoffStepsDone: StateFlow<Set<Int>> = _handoffStepsDone.asStateFlow()
+
+  private data class MeterSliderParams(
+    val variety: Int,
+    val weirdness: Int,
+    val styleInfluence: Int,
+    val audioInfluence: Int,
+    val jobType: JobType
+  )
+
+  private data class MeterContentParams(
+    val stylePrompt: String,
+    val lyricsMap: String,
+    val excludeText: String,
+    val activeLane: String,
+    val audioAnalysis: AudioAnalysisResult?
+  )
+
+  val beatMeterSnapshot: StateFlow<BeatMeterSnapshot> = combine(
+    combine(_variety, _weirdness, _styleInfluence, _audioInfluence, _jobType) { v, w, s, a, j ->
+      MeterSliderParams(v, w, s, a, j)
+    },
+    combine(_stylePrompt, _lyricsMap, _excludeText, _activeLane, _audioAnalysis) { sp, lm, ex, lane, aa ->
+      MeterContentParams(sp, lm, ex, lane, aa)
+    }
+  ) { sliders, content ->
+    BeatIntensityCalculator.compute(
+      variety = sliders.variety,
+      weirdness = sliders.weirdness,
+      styleInfluence = sliders.styleInfluence,
+      audioInfluence = sliders.audioInfluence,
+      stylePrompt = content.stylePrompt,
+      lyricsMap = content.lyricsMap,
+      excludeText = content.excludeText,
+      activeLane = content.activeLane,
+      jobType = sliders.jobType,
+      audioAnalysis = content.audioAnalysis
+    )
+  }.stateIn(
+    scope = viewModelScope,
+    started = SharingStarted.WhileSubscribed(5000),
+    initialValue = BeatIntensityCalculator.compute(
+      variety = 0,
+      weirdness = 25,
+      styleInfluence = 70,
+      audioInfluence = 80,
+      stylePrompt = "",
+      lyricsMap = "",
+      excludeText = "",
+      activeLane = "Trap",
+      jobType = JobType.PRESERVE,
+      audioAnalysis = null
+    )
+  )
+
   init {
     bankRepo.ensureLoaded()
     if (savedStateHandle.contains(KEY_JOB_TYPE)) {
@@ -249,6 +335,11 @@ class MainViewModel(
     } else {
       resetToPreserveDefaults()
     }
+    viewModelScope.launch(Dispatchers.IO) {
+      promptTemplateRepo.ensureSeeded()
+    }
+    refreshConnectivityFromEnvironment()
+    registerNetworkCallbackSafely()
   }
 
   fun retryPromptBankLoad() {
@@ -605,6 +696,7 @@ class MainViewModel(
   private suspend fun runAiBeatConsultation(result: AudioAnalysisResult, wavBytes: ByteArray?) {
     val env = environmentStatusProvider()
     if (!env.isOnline) {
+      recordOfflineOrFirebasePreflightFailure(env, FailedCloudRequestType.BEAT_CONSULTATION)
       _aiConsultationState.value = AiConsultationUiState.Error(
         message = "Offline — reconnect to consult Cloud AI. Local DSP, 41 lanes, and Prompt Builder still work offline.",
         canRetry = true
@@ -612,6 +704,7 @@ class MainViewModel(
       return
     }
     if (!env.isFirebaseReady) {
+      recordOfflineOrFirebasePreflightFailure(env, FailedCloudRequestType.BEAT_CONSULTATION)
       _aiConsultationState.value = AiConsultationUiState.Error(
         message = "Firebase AI service unavailable. Verify configuration and tap Retry.",
         canRetry = true
@@ -656,6 +749,7 @@ class MainViewModel(
           core
         }
       }
+      markCloudServicesHealthy()
       _aiConsultation.value = consultation
       _aiConsultationState.value = AiConsultationUiState.Success(consultation)
 
@@ -683,6 +777,7 @@ class MainViewModel(
         }
       }
     } catch (e: TimeoutCancellationException) {
+      classifyAndRecordCloudFailure(e, FailedCloudRequestType.BEAT_CONSULTATION)
       _aiConsultationState.value = AiConsultationUiState.Error(
         message = "Gemini consultation timed out after 60 seconds. Please retry.",
         canRetry = true
@@ -690,6 +785,7 @@ class MainViewModel(
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
+      classifyAndRecordCloudFailure(e, FailedCloudRequestType.BEAT_CONSULTATION)
       _aiConsultationState.value = AiConsultationUiState.Error(
         message = e.localizedMessage ?: "Firebase AI Logic request failed. Verify network/App Check and retry.",
         canRetry = true
@@ -776,6 +872,7 @@ class MainViewModel(
   private suspend fun executeTranscription(wavBytes: ByteArray, target: TranscriptionTarget) {
     val env = environmentStatusProvider()
     if (!env.isOnline) {
+      recordOfflineOrFirebasePreflightFailure(env, FailedCloudRequestType.MIC_TRANSCRIPTION)
       _micTranscriptionState.value = TranscriptionUiState.Error(
         message = "Offline — reconnect to transcribe audio with Gemini. Saved audio is kept for Retry.",
         target = target,
@@ -784,6 +881,7 @@ class MainViewModel(
       return
     }
     if (!env.isFirebaseReady) {
+      recordOfflineOrFirebasePreflightFailure(env, FailedCloudRequestType.MIC_TRANSCRIPTION)
       _micTranscriptionState.value = TranscriptionUiState.Error(
         message = "Firebase AI service unavailable. Tap Retry when configured.",
         target = target,
@@ -795,6 +893,7 @@ class MainViewModel(
     _micTranscriptionState.value = TranscriptionUiState.Transcribing(target)
     try {
       val transcript = geminiService.transcribeMicrophoneAudio(wavBytes, target)
+      markCloudServicesHealthy()
       _micTranscriptionState.value = TranscriptionUiState.Success(transcript, target)
       if (target == TranscriptionTarget.ANALYZE_SAMPLE_WORDS &&
         !transcript.contains("No intelligible", ignoreCase = true)
@@ -803,6 +902,7 @@ class MainViewModel(
         setSampleWords(transcript.take(120), kind)
       }
     } catch (e: TimeoutCancellationException) {
+      classifyAndRecordCloudFailure(e, FailedCloudRequestType.MIC_TRANSCRIPTION)
       _micTranscriptionState.value = TranscriptionUiState.Error(
         message = "gemini-3.5-transcribe timed out after 60s. Tap Retry.",
         target = target,
@@ -811,6 +911,7 @@ class MainViewModel(
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
+      classifyAndRecordCloudFailure(e, FailedCloudRequestType.MIC_TRANSCRIPTION)
       _micTranscriptionState.value = TranscriptionUiState.Error(
         message = e.localizedMessage ?: "Audio transcription failed.",
         target = target,
@@ -865,9 +966,11 @@ class MainViewModel(
   fun searchSunoKnowledge(query: String) {
     val clean = query.trim()
     if (clean.isEmpty()) return
+    lastSearchQuery = clean
     searchJob?.cancel()
     val env = environmentStatusProvider()
     if (!env.isOnline) {
+      recordOfflineOrFirebasePreflightFailure(env, FailedCloudRequestType.SEARCH_GROUNDING)
       _searchGroundingState.value = SearchGroundingUiState.Error(
         message = "Offline — reconnect to run Google Search Grounding, then tap Retry.",
         query = clean
@@ -875,6 +978,7 @@ class MainViewModel(
       return
     }
     if (!env.isFirebaseReady) {
+      recordOfflineOrFirebasePreflightFailure(env, FailedCloudRequestType.SEARCH_GROUNDING)
       _searchGroundingState.value = SearchGroundingUiState.Error(
         message = "Firebase AI service unavailable. Tap Retry when configured.",
         query = clean
@@ -886,8 +990,10 @@ class MainViewModel(
       _searchGroundingState.value = SearchGroundingUiState.Loading(clean)
       try {
         val result = geminiService.researchWithGoogleSearch(clean)
+        markCloudServicesHealthy()
         _searchGroundingState.value = SearchGroundingUiState.Success(result)
       } catch (e: TimeoutCancellationException) {
+        classifyAndRecordCloudFailure(e, FailedCloudRequestType.SEARCH_GROUNDING)
         _searchGroundingState.value = SearchGroundingUiState.Error(
           message = "Search grounding timed out after 60s. Tap Retry.",
           query = clean
@@ -895,6 +1001,7 @@ class MainViewModel(
       } catch (e: CancellationException) {
         throw e
       } catch (e: Exception) {
+        classifyAndRecordCloudFailure(e, FailedCloudRequestType.SEARCH_GROUNDING)
         _searchGroundingState.value = SearchGroundingUiState.Error(
           message = e.localizedMessage ?: "Google Search grounding request failed.",
           query = clean
@@ -1233,6 +1340,137 @@ class MainViewModel(
     savedStateHandle[KEY_LIBRARY_LANE] = lane
   }
 
+  fun setTemplateSearchQuery(query: String) {
+    _templateSearchQuery.value = query
+    savedStateHandle[KEY_TEMPLATE_QUERY] = query
+  }
+
+  fun setTemplateCategoryFilter(category: String) {
+    _templateCategoryFilter.value = category
+    savedStateHandle[KEY_TEMPLATE_CATEGORY] = category
+  }
+
+  fun applyPromptTemplate(
+    template: PromptTemplateEntity,
+    context: Context? = null,
+    switchToBuild: Boolean = true
+  ) {
+    val resolvedJob = JobType.fromString(template.jobType)
+    _jobType.value = resolvedJob
+    if (template.lane.isNotBlank()) {
+      _activeLane.value = template.lane
+    }
+    _stylePrompt.value = template.stylePrompt.take(STYLE_LIMIT)
+    _lyricsMap.value = template.lyricsMap.ifBlank {
+      bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJob)
+    }.take(LYRICS_LIMIT)
+    _excludeText.value = template.excludeText.take(EXCLUDE_LIMIT)
+    _variety.value = template.variety.coerceIn(0, 100)
+    _weirdness.value = template.weirdness.coerceIn(0, 100)
+    _styleInfluence.value = template.styleInfluence.coerceIn(0, 100)
+    _audioInfluence.value = template.audioInfluence.coerceIn(0, 100)
+    _complianceUndoSnapshot.value = null
+    savedStateHandle.remove<String>(KEY_COMPLIANCE_UNDO)
+    updateSimplePrompt()
+    resetHandoffSteps()
+    persistAllCoreState()
+    if (switchToBuild) {
+      setTab(StudioTab.BUILD)
+    }
+    if (template.id > 0L) {
+      viewModelScope.launch(Dispatchers.IO) {
+        promptTemplateRepo.recordUsage(template.id)
+      }
+    }
+    if (context != null) {
+      Toast.makeText(context, "Applied template '${template.title}'", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun applyStylePromptFromBank(prompt: StylePrompt, context: Context? = null) {
+    val resolvedJob = when (prompt.track) {
+      2 -> JobType.PRESERVE
+      1 -> JobType.ORIGINAL
+      else -> _jobType.value
+    }
+    _jobType.value = resolvedJob
+    if (prompt.subgenre.isNotBlank() && bankRepo.allLanes.contains(prompt.subgenre)) {
+      _activeLane.value = prompt.subgenre
+    }
+    val appliedStyle = if (resolvedJob == JobType.PRESERVE && !prompt.text.contains(LOCK_LINE)) {
+      "$LOCK_LINE. ${prompt.text}"
+    } else {
+      prompt.text
+    }
+    _stylePrompt.value = appliedStyle.take(STYLE_LIMIT)
+    _lyricsMap.value = bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJob)
+    if (resolvedJob == JobType.PRESERVE) {
+      _audioInfluence.value = 80
+    } else if (prompt.track == 1) {
+      _audioInfluence.value = 0
+    }
+    updateSimplePrompt()
+    resetHandoffSteps()
+    persistAllCoreState()
+    setTab(StudioTab.BUILD)
+    if (context != null) {
+      Toast.makeText(context, "Applied ${prompt.subgenre} prompt to Build", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun saveCurrentAsTemplate(
+    title: String,
+    category: String,
+    bpmHint: String = "",
+    context: Context? = null
+  ) {
+    val cleanTitle = title.trim().ifEmpty { "${_activeLane.value} Preset" }
+    val cleanCategory = category.trim().ifEmpty { _activeLane.value.ifBlank { "Custom" } }
+    val resolvedBpm = bpmHint.trim().ifEmpty {
+      _audioAnalysis.value?.bpm?.let { "${it.toInt()} BPM" } ?: ""
+    }
+    viewModelScope.launch(Dispatchers.IO) {
+      promptTemplateRepo.saveTemplate(
+        title = cleanTitle,
+        category = cleanCategory,
+        lane = _activeLane.value,
+        jobType = _jobType.value,
+        bpmHint = resolvedBpm,
+        stylePrompt = _stylePrompt.value,
+        lyricsMap = _lyricsMap.value,
+        excludeText = _excludeText.value,
+        variety = _variety.value,
+        weirdness = _weirdness.value,
+        styleInfluence = _styleInfluence.value,
+        audioInfluence = _audioInfluence.value
+      )
+    }
+    if (context != null) {
+      Toast.makeText(context, "Saved '$cleanTitle' to Templates", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun toggleTemplatePinned(template: PromptTemplateEntity) {
+    viewModelScope.launch(Dispatchers.IO) {
+      promptTemplateRepo.setPinned(template.id, !template.isPinned)
+    }
+  }
+
+  fun deletePromptTemplate(template: PromptTemplateEntity) {
+    viewModelScope.launch(Dispatchers.IO) {
+      promptTemplateRepo.deleteById(template.id)
+    }
+  }
+
+  fun restoreStarterTemplates(context: Context? = null) {
+    viewModelScope.launch(Dispatchers.IO) {
+      promptTemplateRepo.restoreStarterTemplates()
+    }
+    if (context != null) {
+      Toast.makeText(context, "Restored starter Suno templates", Toast.LENGTH_SHORT).show()
+    }
+  }
+
   fun copyToClipboard(context: Context, label: String, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val clip = ClipData.newPlainText(label, text)
@@ -1386,13 +1624,18 @@ ${_lyricsMap.value}
       val entries = historyRepo.getRecentSnapshot()
       val snapshot = if (includeSnapshot) currentComplianceSnapshot() else null
       val json = historyRepo.exportHistoryJson(entries, snapshot)
-      val writeError = withContext(Dispatchers.IO) {
+      val writeError: String? = withContext(Dispatchers.IO) {
         try {
-          context.contentResolver.openOutputStream(uri)?.use { stream ->
-            stream.write(json.toByteArray(Charsets.UTF_8))
-            stream.flush()
+          val stream = context.contentResolver.openOutputStream(uri)
+          if (stream == null) {
+            "Unable to open destination file."
+          } else {
+            stream.use { out ->
+              out.write(json.toByteArray(Charsets.UTF_8))
+              out.flush()
+            }
             null
-          } ?: "Unable to open destination file."
+          }
         } catch (e: Exception) {
           e.localizedMessage ?: "Failed writing backup file."
         }
@@ -1405,30 +1648,36 @@ ${_lyricsMap.value}
     }
   }
 
+  fun validateHistoryBackupSchema(jsonStr: String): HistorySchemaValidationResult {
+    return historyRepo.validateHistorySchema(jsonStr)
+  }
+
   fun importPromptHistoryFromJson(
     context: Context,
     jsonStr: String,
-    restoreSnapshot: Boolean = true
+    restoreSnapshot: Boolean = true,
+    mode: HistoryImportMode = HistoryImportMode.MERGE
   ) {
     viewModelScope.launch {
-      val result = historyRepo.importHistoryJson(jsonStr)
+      val result = historyRepo.importHistoryJson(jsonStr, mode = mode)
       if (restoreSnapshot && result.restoredSnapshot != null) {
         val before = currentComplianceSnapshot().copy(fixSummary = "Imported Backup Snapshot")
         _complianceUndoSnapshot.value = before
         savedStateHandle[KEY_COMPLIANCE_UNDO] = before.toJson()
         applyComplianceSnapshot(result.restoredSnapshot)
       }
+      val modeWord = if (mode == HistoryImportMode.MERGE) "Merged" else "Replaced with"
       val msg = when {
         result.errorMessage != null && result.importedCount == 0 && result.restoredSnapshot == null ->
           result.errorMessage
         result.skippedCount > 0 ->
-          "Imported ${result.importedCount} prompt(s) (${result.skippedCount} skipped)"
+          "$modeWord ${result.importedCount} prompt(s) (${result.skippedCount} skipped)"
         result.restoredSnapshot != null && result.importedCount == 0 ->
           "Restored Studio Compliance Snapshot"
         result.restoredSnapshot != null ->
-          "Imported ${result.importedCount} prompt(s) & restored snapshot"
+          "$modeWord ${result.importedCount} prompt(s) & restored snapshot"
         else ->
-          "Imported ${result.importedCount} prompt(s) into Recent 20"
+          "$modeWord ${result.importedCount} prompt(s) into Recent 20"
       }
       Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     }
@@ -1437,7 +1686,8 @@ ${_lyricsMap.value}
   fun importPromptHistoryFromUri(
     context: Context,
     uri: Uri,
-    restoreSnapshot: Boolean = true
+    restoreSnapshot: Boolean = true,
+    mode: HistoryImportMode = HistoryImportMode.MERGE
   ) {
     viewModelScope.launch {
       val readResult = withContext(Dispatchers.IO) {
@@ -1456,13 +1706,9 @@ ${_lyricsMap.value}
         Toast.makeText(context, error, Toast.LENGTH_LONG).show()
         return@launch
       }
-      importPromptHistoryFromJson(context, readResult.first, restoreSnapshot)
+      importPromptHistoryFromJson(context, readResult.first, restoreSnapshot, mode)
     }
   }
-
-  // Suno Handoff Checklist Tracking (Steps 1..5)
-  private val _handoffStepsDone = MutableStateFlow<Set<Int>>(emptySet())
-  val handoffStepsDone: StateFlow<Set<Int>> = _handoffStepsDone.asStateFlow()
 
   fun resetHandoffSteps() {
     _handoffStepsDone.value = emptySet()
@@ -1710,8 +1956,271 @@ ${_lyricsMap.value}
     lastTranscriptionTarget = target
   }
 
+  internal fun setPendingSearchQueryForTest(query: String) {
+    lastSearchQuery = query
+  }
+
+  internal fun refreshConnectivityFromEnvironment() {
+    val env = environmentStatusProvider()
+    if (!env.isOnline) {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = false,
+        firebaseHealth = FirebaseHealthStatus.OFFLINE,
+        geminiHealth = GeminiHealthStatus.OFFLINE,
+        lastErrorMessage = "Device offline — reconnect to reach Firebase & Gemini. Local studio tools stay active.",
+        isRetrying = false
+      )
+    } else if (!env.isFirebaseReady) {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = true,
+        firebaseHealth = FirebaseHealthStatus.UNREACHABLE,
+        geminiHealth = GeminiHealthStatus.HEALTHY,
+        lastErrorMessage = "Firebase service is unreachable. Local studio tools stay active.",
+        isRetrying = false
+      )
+    } else {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = true,
+        firebaseHealth = FirebaseHealthStatus.HEALTHY,
+        geminiHealth = GeminiHealthStatus.HEALTHY,
+        lastErrorMessage = null,
+        isRetrying = false
+      )
+    }
+  }
+
+  private fun registerNetworkCallbackSafely() {
+    try {
+      val appCtx = getApplication<Application>()
+      val cm = appCtx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+      val cb = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+          updateConnectivityOnNetworkChange(isOnline = true)
+        }
+
+        override fun onLost(network: Network) {
+          updateConnectivityOnNetworkChange(isOnline = false)
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+          val hasNet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+          updateConnectivityOnNetworkChange(isOnline = hasNet)
+        }
+      }
+      cm.registerDefaultNetworkCallback(cb)
+      connectivityManagerRef = cm
+      networkCallback = cb
+    } catch (_: Exception) {
+      // Ignore on restricted environments
+    }
+  }
+
+  internal fun updateConnectivityOnNetworkChange(isOnline: Boolean) {
+    val current = _connectivityState.value
+    if (!isOnline) {
+      _connectivityState.value = current.copy(
+        isNetworkOnline = false,
+        firebaseHealth = FirebaseHealthStatus.OFFLINE,
+        geminiHealth = GeminiHealthStatus.OFFLINE,
+        lastErrorMessage = "Device offline — reconnect to use Cloud AI. Local DSP, 41 lanes, and Builder stay active.",
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+    } else {
+      val env = environmentStatusProvider()
+      val nextFirebase = if (env.isFirebaseReady) {
+        if (current.firebaseHealth == FirebaseHealthStatus.OFFLINE ||
+          current.firebaseHealth == FirebaseHealthStatus.INITIALIZING
+        ) {
+          FirebaseHealthStatus.HEALTHY
+        } else {
+          current.firebaseHealth
+        }
+      } else {
+        FirebaseHealthStatus.UNREACHABLE
+      }
+      val nextGemini = if (current.geminiHealth == GeminiHealthStatus.OFFLINE) {
+        GeminiHealthStatus.HEALTHY
+      } else {
+        current.geminiHealth
+      }
+      val stillHasError = nextFirebase != FirebaseHealthStatus.HEALTHY || nextGemini != GeminiHealthStatus.HEALTHY
+      _connectivityState.value = current.copy(
+        isNetworkOnline = true,
+        firebaseHealth = nextFirebase,
+        geminiHealth = nextGemini,
+        lastErrorMessage = if (stillHasError) current.lastErrorMessage else null,
+        isRetrying = false
+      )
+    }
+  }
+
+  private fun recordOfflineOrFirebasePreflightFailure(
+    env: EnvironmentStatus,
+    failedRequest: FailedCloudRequestType
+  ) {
+    if (!env.isOnline) {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = false,
+        firebaseHealth = FirebaseHealthStatus.OFFLINE,
+        geminiHealth = GeminiHealthStatus.OFFLINE,
+        lastErrorMessage = "Offline — reconnect for ${failedRequest.label}. Local tools stay usable.",
+        lastFailedRequest = failedRequest,
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+    } else if (!env.isFirebaseReady) {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = true,
+        firebaseHealth = FirebaseHealthStatus.UNREACHABLE,
+        geminiHealth = GeminiHealthStatus.HEALTHY,
+        lastErrorMessage = "Firebase unavailable for ${failedRequest.label}. Local studio tools stay usable.",
+        lastFailedRequest = failedRequest,
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+    }
+  }
+
+  private fun classifyAndRecordCloudFailure(
+    error: Throwable,
+    failedRequest: FailedCloudRequestType
+  ) {
+    val msg = error.localizedMessage ?: error.message ?: ""
+    val lower = msg.lowercase()
+    val env = environmentStatusProvider()
+    if (!env.isOnline) {
+      recordOfflineOrFirebasePreflightFailure(env, failedRequest)
+      return
+    }
+    if (error is TimeoutCancellationException) {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = true,
+        firebaseHealth = if (env.isFirebaseReady) FirebaseHealthStatus.HEALTHY else FirebaseHealthStatus.UNREACHABLE,
+        geminiHealth = GeminiHealthStatus.TIMED_OUT,
+        lastErrorMessage = "Gemini timed out during ${failedRequest.label}. Local tools stay usable.",
+        lastFailedRequest = failedRequest,
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+    } else if (
+      lower.contains("app check") ||
+      lower.contains("appcheck") ||
+      lower.contains("firebase") ||
+      lower.contains("403") ||
+      lower.contains("permission") ||
+      lower.contains("unauthenticated")
+    ) {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = true,
+        firebaseHealth = FirebaseHealthStatus.UNREACHABLE,
+        geminiHealth = GeminiHealthStatus.HEALTHY,
+        lastErrorMessage = msg.ifBlank { "Firebase App Check/Auth unreachable. Tap Retry to re-probe." },
+        lastFailedRequest = failedRequest,
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+    } else {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = true,
+        firebaseHealth = if (env.isFirebaseReady) FirebaseHealthStatus.HEALTHY else FirebaseHealthStatus.UNREACHABLE,
+        geminiHealth = GeminiHealthStatus.UNREACHABLE,
+        lastErrorMessage = msg.ifBlank { "Gemini unreachable during ${failedRequest.label}. Tap Retry." },
+        lastFailedRequest = failedRequest,
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+    }
+  }
+
+  private fun markCloudServicesHealthy() {
+    _connectivityState.value = _connectivityState.value.copy(
+      isNetworkOnline = true,
+      firebaseHealth = FirebaseHealthStatus.HEALTHY,
+      geminiHealth = GeminiHealthStatus.HEALTHY,
+      lastErrorMessage = null,
+      lastFailedRequest = null,
+      isRetrying = false,
+      isBannerDismissed = false
+    )
+  }
+
+  fun dismissConnectivityBanner() {
+    _connectivityState.value = _connectivityState.value.copy(isBannerDismissed = true)
+  }
+
+  fun retryConnectionAndLastRequest() {
+    val pendingRequest = _connectivityState.value.lastFailedRequest
+    _connectivityState.value = _connectivityState.value.copy(
+      isRetrying = true,
+      isBannerDismissed = false
+    )
+
+    var env = environmentStatusProvider()
+    if (env.isOnline && !env.isFirebaseReady) {
+      configureAppCheck(getApplication(), null)
+      env = environmentStatusProvider()
+    }
+
+    if (!env.isOnline) {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = false,
+        firebaseHealth = FirebaseHealthStatus.OFFLINE,
+        geminiHealth = GeminiHealthStatus.OFFLINE,
+        lastErrorMessage = "Still offline — reconnect and tap Retry. Local tools remain active.",
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+      return
+    }
+
+    if (!env.isFirebaseReady) {
+      _connectivityState.value = _connectivityState.value.copy(
+        isNetworkOnline = true,
+        firebaseHealth = FirebaseHealthStatus.UNREACHABLE,
+        geminiHealth = GeminiHealthStatus.HEALTHY,
+        lastErrorMessage = "Firebase still unreachable after re-probe. Tap Retry shortly.",
+        isRetrying = false,
+        isBannerDismissed = false
+      )
+      return
+    }
+
+    _connectivityState.value = _connectivityState.value.copy(
+      isNetworkOnline = true,
+      firebaseHealth = FirebaseHealthStatus.HEALTHY,
+      geminiHealth = GeminiHealthStatus.HEALTHY,
+      lastErrorMessage = null,
+      isRetrying = false,
+      isBannerDismissed = false
+    )
+
+    when (pendingRequest) {
+      FailedCloudRequestType.BEAT_CONSULTATION -> retryAiConsultation()
+      FailedCloudRequestType.MIC_TRANSCRIPTION -> retryLastTranscription()
+      FailedCloudRequestType.SEARCH_GROUNDING -> {
+        if (lastSearchQuery.isNotBlank()) {
+          searchSunoKnowledge(lastSearchQuery)
+        }
+      }
+      null -> Unit
+    }
+  }
+
+  internal fun reportConnectivityStateForTest(state: GlobalConnectivityState) {
+    _connectivityState.value = state
+  }
+
   override fun onCleared() {
     super.onCleared()
+    networkCallback?.let { cb ->
+      try {
+        connectivityManagerRef?.unregisterNetworkCallback(cb)
+      } catch (_: Exception) {
+      }
+    }
+    networkCallback = null
+    connectivityManagerRef = null
     analysisJob?.cancel()
     aiJob?.cancel()
     transcribeJob?.cancel()
@@ -1737,6 +2246,8 @@ ${_lyricsMap.value}
     private const val KEY_LIBRARY_QUERY = "library_query"
     private const val KEY_LIBRARY_TRACK = "library_filter_track"
     private const val KEY_LIBRARY_LANE = "library_filter_lane"
+    private const val KEY_TEMPLATE_QUERY = "template_search_query"
+    private const val KEY_TEMPLATE_CATEGORY = "template_category_filter"
     private const val KEY_TAKE_FILTER = "take_filter_result"
     private const val KEY_HANDOFF_STEPS = "handoff_steps_done"
     private const val KEY_COMPLIANCE_UNDO = "compliance_undo_snapshot"

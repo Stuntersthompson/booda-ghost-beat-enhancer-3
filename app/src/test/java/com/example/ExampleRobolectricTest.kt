@@ -1104,6 +1104,8 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
+    composeTestRule.onNodeWithTag("build_list").performScrollToNode(hasTestTag("build_mic_transcribe_card"))
+    composeTestRule.waitForIdle()
     composeTestRule.onNodeWithTag("build_mic_transcribe_card").assertIsDisplayed()
     composeTestRule.onNodeWithTag("action_build_dictate_lyrics").assertIsDisplayed()
     composeTestRule.onNodeWithTag("action_build_dictate_style").assertIsDisplayed()

@@ -8,17 +8,24 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.FavoritePromptEntity
 import com.example.data.model.PromptHistoryEntity
+import com.example.data.model.PromptTemplateEntity
 import com.example.data.model.TakeEntity
 
 @Database(
-  entities = [TakeEntity::class, FavoritePromptEntity::class, PromptHistoryEntity::class],
-  version = 4,
+  entities = [
+    TakeEntity::class,
+    FavoritePromptEntity::class,
+    PromptHistoryEntity::class,
+    PromptTemplateEntity::class
+  ],
+  version = 5,
   exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
   abstract fun takeDao(): TakeDao
   abstract fun favoritePromptDao(): FavoritePromptDao
   abstract fun promptHistoryDao(): PromptHistoryDao
+  abstract fun promptTemplateDao(): PromptTemplateDao
 
   companion object {
     @Volatile
@@ -71,6 +78,39 @@ abstract class AppDatabase : RoomDatabase() {
       }
     }
 
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+          CREATE TABLE IF NOT EXISTS prompt_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            title TEXT NOT NULL,
+            category TEXT NOT NULL,
+            lane TEXT NOT NULL,
+            jobType TEXT NOT NULL,
+            bpmHint TEXT NOT NULL,
+            stylePrompt TEXT NOT NULL,
+            lyricsMap TEXT NOT NULL,
+            excludeText TEXT NOT NULL,
+            variety INTEGER NOT NULL,
+            weirdness INTEGER NOT NULL,
+            styleInfluence INTEGER NOT NULL,
+            audioInfluence INTEGER NOT NULL,
+            useCount INTEGER NOT NULL,
+            isPinned INTEGER NOT NULL,
+            isStarter INTEGER NOT NULL,
+            createdAt INTEGER NOT NULL,
+            lastUsedAt INTEGER NOT NULL
+          )
+        """.trimIndent())
+        db.execSQL(
+          "CREATE INDEX IF NOT EXISTS index_prompt_templates_category ON prompt_templates(category)"
+        )
+        db.execSQL(
+          "CREATE INDEX IF NOT EXISTS index_prompt_templates_isPinned_useCount_lastUsedAt ON prompt_templates(isPinned, useCount, lastUsedAt)"
+        )
+      }
+    }
+
     fun getDatabase(context: Context): AppDatabase {
       return INSTANCE ?: synchronized(this) {
         val instance = Room.databaseBuilder(
@@ -78,7 +118,7 @@ abstract class AppDatabase : RoomDatabase() {
           AppDatabase::class.java,
           "booda_beat.db"
         )
-          .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+          .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
           .build()
         INSTANCE = instance
         instance
