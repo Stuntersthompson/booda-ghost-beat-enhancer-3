@@ -4,6 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -16,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +29,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
@@ -48,33 +53,45 @@ fun StudioBottomBar(
   currentTab: StudioTab,
   onTabSelected: (StudioTab) -> Unit
 ) {
+  val listState = rememberLazyListState()
+  val tabs = StudioTab.entries
+
+  LaunchedEffect(currentTab) {
+    val idx = tabs.indexOf(currentTab)
+    if (idx >= 0) {
+      listState.animateScrollToItem(idx)
+    }
+  }
+
   Surface(
     color = StudioSurface,
     modifier = Modifier
       .fillMaxWidth()
       .navigationBarsPadding()
-      .border(0.5.dp, StudioBorder),
+      .border(0.5.dp, StudioBorder)
+      .testTag("studio_bottom_bar"),
     shadowElevation = 8.dp
   ) {
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(horizontal = 4.dp, vertical = 4.dp),
-      horizontalArrangement = Arrangement.SpaceAround,
+    LazyRow(
+      state = listState,
+      modifier = Modifier.fillMaxWidth(),
+      contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+      horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
       verticalAlignment = Alignment.CenterVertically
     ) {
-      StudioTab.entries.forEach { tab ->
+      items(tabs, key = { it.name }) { tab ->
         val selected = tab == currentTab
         val (icon, label) = tabIconAndLabel(tab)
 
         Column(
           horizontalAlignment = Alignment.CenterHorizontally,
           modifier = Modifier
+            .defaultMinSize(minWidth = 54.dp, minHeight = 48.dp)
             .minimumInteractiveComponentSize()
             .clip(RoundedCornerShape(8.dp))
             .semantics { this.selected = selected }
             .clickable { onTabSelected(tab) }
-            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
             .testTag("tab_${tab.name.lowercase()}")
         ) {
           Box(
@@ -98,7 +115,10 @@ fun StudioBottomBar(
               fontSize = 10.sp,
               fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
             ),
-            color = if (selected) AmberGold else TextMuted
+            color = if (selected) AmberGold else TextMuted,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
           )
         }
       }

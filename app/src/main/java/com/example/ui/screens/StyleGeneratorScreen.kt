@@ -36,6 +36,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -44,6 +45,7 @@ import com.example.data.model.JobType
 import com.example.data.model.SUNO_STYLE_BOX_LIMIT
 import com.example.data.repository.CuratedPrompts
 import com.example.data.repository.HistoryImportMode
+import com.example.ui.components.BrandLogoImage
 import com.example.ui.components.RecentPromptsHistoryCard
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
@@ -51,6 +53,7 @@ import com.example.viewmodel.StudioTab
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StyleGeneratorScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
@@ -130,7 +133,14 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
   var selectedVibe by rememberSaveable { mutableStateOf(vibeOptions[0]) }
   var builderInteracted by rememberSaveable { mutableStateOf(false) }
 
-  val currentBpm = bpm?.bpm?.toInt() ?: 130
+  val measuredBpm = bpm?.takeIf { it.isAudioMeasured }?.bpm?.toInt()
+  var targetBpm by rememberSaveable { mutableIntStateOf(measuredBpm?.coerceIn(70, 175) ?: 120) }
+  LaunchedEffect(measuredBpm) {
+    if (measuredBpm != null) {
+      targetBpm = measuredBpm.coerceIn(70, 175)
+    }
+  }
+  val currentBpm = targetBpm
   val isPreserve = jobType == JobType.PRESERVE
 
   val generatedPrompt = remember(selectedSample, selectedDrums, selectedVibe, isPreserve, currentBpm) {
@@ -370,10 +380,21 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+              .weight(1f)
+              .padding(end = 6.dp)
+          ) {
             Icon(Icons.Default.Bolt, contentDescription = null, tint = AmberGold, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("INTERACTIVE STYLE BUILDER", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+            Text(
+              text = "INTERACTIVE STYLE BUILDER",
+              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+              color = AmberGold,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
           }
           Row(verticalAlignment = Alignment.CenterVertically) {
             Surface(
@@ -384,6 +405,8 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
                 text = "${generatedPrompt.length} / $SUNO_STYLE_BOX_LIMIT c",
                 style = MonospaceMetric.copy(fontSize = 12.sp),
                 color = if (generatedPrompt.length <= SUNO_STYLE_BOX_LIMIT) StudioCyan else StudioMiss,
+                maxLines = 1,
+                softWrap = false,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
               )
             }
@@ -413,13 +436,62 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
           }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = if (measuredBpm != null && currentBpm == measuredBpm.coerceIn(70, 175)) {
+              "TEMPO (MEASURED)"
+            } else {
+              "TARGET TEMPO (BPM)"
+            },
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = TextMuted
+          )
+          Surface(
+            color = StudioCardElevated,
+            shape = RoundedCornerShape(6.dp)
+          ) {
+            Text(
+              text = if (measuredBpm != null && currentBpm == measuredBpm.coerceIn(70, 175)) {
+                "Measured: $currentBpm BPM"
+              } else {
+                "Target: $currentBpm BPM"
+              },
+              style = MonospaceMetric.copy(fontSize = 11.sp),
+              color = if (measuredBpm != null && currentBpm == measuredBpm.coerceIn(70, 175)) StudioWinner else StudioCyan,
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+          }
+        }
+        Slider(
+          value = targetBpm.toFloat(),
+          onValueChange = {
+            targetBpm = it.toInt().coerceIn(70, 175)
+            builderInteracted = true
+          },
+          valueRange = 70f..175f,
+          colors = SliderDefaults.colors(
+            thumbColor = AmberGold,
+            activeTrackColor = AmberGold,
+            inactiveTrackColor = StudioBg
+          ),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("style_generator_bpm_slider")
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
 
         Text("1. SAMPLE FOUNDATION (MAIN MELODY):", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = TextMuted)
         Spacer(modifier = Modifier.height(4.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           items(sampleOptions) { s ->
-            ChipOption(text = s.take(28) + "...", isSelected = s == selectedSample) {
+            ChipOption(text = s, isSelected = s == selectedSample) {
               selectedSample = s
               builderInteracted = true
             }
@@ -432,7 +504,7 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
         Spacer(modifier = Modifier.height(4.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           items(drumOptions) { d ->
-            ChipOption(text = d.take(28) + "...", isSelected = d == selectedDrums) {
+            ChipOption(text = d, isSelected = d == selectedDrums) {
               selectedDrums = d
               builderInteracted = true
             }
@@ -445,7 +517,7 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
         Spacer(modifier = Modifier.height(4.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           items(vibeOptions) { v ->
-            ChipOption(text = v.take(28) + "...", isSelected = v == selectedVibe) {
+            ChipOption(text = v, isSelected = v == selectedVibe) {
               selectedVibe = v
               builderInteracted = true
             }
@@ -555,11 +627,11 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
         verticalArrangement = Arrangement.Center
       ) {
         if (curatedCategory == "Favorites" && favoriteIds.isEmpty()) {
-          Icon(
-            imageVector = Icons.Default.FavoriteBorder,
-            contentDescription = null,
-            tint = StudioMiss,
-            modifier = Modifier.size(44.dp)
+          BrandLogoImage(
+            height = 72.dp,
+            contentDescription = "BooDa Beat Enhancer official logo",
+            framed = true,
+            modifier = Modifier.testTag("styles_favorites_empty_logo")
           )
           Spacer(modifier = Modifier.height(12.dp))
           Text(
@@ -583,11 +655,11 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
             Text("Browse All 150 Prompts", color = AmberGold)
           }
         } else {
-          Icon(
-            imageVector = Icons.Default.SearchOff,
-            contentDescription = null,
-            tint = TextMuted,
-            modifier = Modifier.size(44.dp)
+          BrandLogoImage(
+            height = 72.dp,
+            contentDescription = "BooDa Beat Enhancer official logo",
+            framed = true,
+            modifier = Modifier.testTag("styles_search_empty_logo")
           )
           Spacer(modifier = Modifier.height(12.dp))
           Text(
@@ -744,6 +816,7 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
               onImportBackupJson = { json, mode, restore ->
                 viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore, mode = mode)
               },
+              onSaveAsTemplate = { entry -> viewModel.saveHistoryEntryAsTemplate(entry, context) },
               validateSchema = viewModel::validateHistoryBackupSchema
             )
           }
@@ -818,6 +891,7 @@ fun StyleGeneratorScreen(viewModel: MainViewModel) {
             onImportBackupJson = { json, mode, restore ->
               viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore, mode = mode)
             },
+            onSaveAsTemplate = { entry -> viewModel.saveHistoryEntryAsTemplate(entry, context) },
             validateSchema = viewModel::validateHistoryBackupSchema
           )
         }
@@ -851,6 +925,7 @@ private fun ChipOption(text: String, isSelected: Boolean, onClick: () -> Unit) {
     shape = RoundedCornerShape(8.dp),
     modifier = Modifier
       .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+      .widthIn(max = 220.dp)
       .clip(RoundedCornerShape(8.dp))
       .clickable { onClick() }
       .border(0.5.dp, if (isSelected) AmberGold else StudioBorder, RoundedCornerShape(8.dp))
@@ -862,12 +937,15 @@ private fun ChipOption(text: String, isSelected: Boolean, onClick: () -> Unit) {
       Text(
         text = text,
         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-        color = if (isSelected) AmberGold else TextPrimary
+        color = if (isSelected) AmberGold else TextPrimary,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
       )
     }
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CuratedPromptItemCard(
   item: CuratedSunoPrompt,
@@ -912,7 +990,13 @@ private fun CuratedPromptItemCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(
+          verticalArrangement = Arrangement.spacedBy(4.dp),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          modifier = Modifier
+            .weight(1f)
+            .padding(end = 4.dp)
+        ) {
           Surface(
             color = if (isGospel) AmberContainer else CyanContainer,
             shape = RoundedCornerShape(4.dp)
@@ -921,11 +1005,18 @@ private fun CuratedPromptItemCard(
               text = item.subgenre,
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
               color = if (isGospel) AmberGold else StudioCyan,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
               modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
             )
           }
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(item.bpmHint, style = MaterialTheme.typography.labelSmall, color = TextMuted)
+          Text(
+            text = item.bpmHint,
+            style = MaterialTheme.typography.labelSmall,
+            color = TextMuted,
+            maxLines = 1,
+            softWrap = false
+          )
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {

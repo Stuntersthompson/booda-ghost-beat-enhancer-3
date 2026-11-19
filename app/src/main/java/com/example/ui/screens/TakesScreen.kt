@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,9 +40,11 @@ import com.example.data.model.TakeAnalytics
 import com.example.data.model.TakeAnalyticsSummary
 import com.example.data.model.TakeComparisonResult
 import com.example.data.model.TakeEntity
+import com.example.ui.components.BrandLogoImage
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TakesScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
@@ -234,8 +237,13 @@ fun TakesScreen(viewModel: MainViewModel) {
         modifier = Modifier.padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
       ) {
-        Icon(Icons.Default.Bookmarks, contentDescription = null, tint = TextMuted, modifier = Modifier.size(36.dp))
-        Spacer(modifier = Modifier.height(10.dp))
+        BrandLogoImage(
+          height = 72.dp,
+          contentDescription = "BooDa Beat Enhancer official logo",
+          framed = true,
+          modifier = Modifier.testTag("takes_empty_logo")
+        )
+        Spacer(modifier = Modifier.height(12.dp))
         Text("No takes logged yet", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
         Text("Build a prompt package in the Build tab and tap 'Save Take' to log it here.", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
       }
@@ -270,7 +278,7 @@ fun TakesScreen(viewModel: MainViewModel) {
       onCopy = {
         val bundle = """=== TAKE: ${take.name.uppercase()} ===
 Beat: ${if (take.beatTitle.isNotBlank()) take.beatTitle else take.name}
-Lane: ${take.lane} | Job: ${take.jobType.uppercase()} | BPM: ${if (take.bpm > 0) take.bpm.toInt().toString() else "N/A"}
+Lane: ${take.lane} | Job: ${take.jobType.uppercase()} | BPM: ${if (take.bpm > 0) take.bpm.toInt().toString() else "Unread"}
 Status: ${take.result.uppercase()} | Settings: ${take.settings}
 ${if (take.nextChange.isNotBlank()) "Next Change: ${take.nextChange}\n" else ""}
 --- STYLE OF MUSIC ---
@@ -502,14 +510,14 @@ private fun TakesAnalyticsCard(analytics: TakeAnalyticsSummary) {
                   color = TextPrimary,
                   maxLines = 1,
                   overflow = TextOverflow.Ellipsis,
-                  modifier = Modifier.weight(0.42f)
+                  modifier = Modifier.weight(0.40f).padding(end = 6.dp)
                 )
                 LinearProgressIndicator(
                   progress = { (stat.winRatePercent / 100f).coerceIn(0f, 1f) },
                   color = if (stat.winRatePercent >= 50) StudioWinner else AmberGold,
                   trackColor = StudioBg,
                   modifier = Modifier
-                    .weight(0.38f)
+                    .weight(0.28f)
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp))
                 )
@@ -517,7 +525,10 @@ private fun TakesAnalyticsCard(analytics: TakeAnalyticsSummary) {
                   text = " ${stat.winRatePercent}% (${stat.winners}/${stat.total})",
                   style = MonospaceMetric.copy(fontSize = 10.sp),
                   color = StudioCyan,
-                  modifier = Modifier.weight(0.20f)
+                  maxLines = 1,
+                  softWrap = false,
+                  textAlign = TextAlign.End,
+                  modifier = Modifier.weight(0.32f)
                 )
               }
             }
@@ -670,6 +681,7 @@ private fun TakeABDiffCard(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TakeItemCard(
   take: TakeEntity,
@@ -687,6 +699,7 @@ private fun TakeItemCard(
 ) {
   var editingNote by rememberSaveable(take.id) { mutableStateOf(false) }
   var noteInput by rememberSaveable(take.id, take.nextChange) { mutableStateOf(take.nextChange) }
+  var showFullPrompts by rememberSaveable(take.id) { mutableStateOf(false) }
 
   Surface(
     color = StudioCard,
@@ -701,61 +714,81 @@ private fun TakeItemCard(
       .testTag("take_card_${take.id}")
   ) {
     Column(modifier = Modifier.padding(14.dp)) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Column(modifier = Modifier.weight(1f)) {
-          Text(take.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
-          if (take.beatTitle.isNotBlank() && take.beatTitle != take.name) {
-            Text("Beat: ${take.beatTitle}", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-          }
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(take.lane, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold), color = AmberGold)
-            Text(" · ${take.jobType.uppercase()}", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-            if (take.bpm > 0) {
-              Spacer(modifier = Modifier.width(6.dp))
-              Surface(
-                color = StudioCardElevated,
-                shape = RoundedCornerShape(4.dp)
-              ) {
-                Text(
-                  text = "${take.bpm.toInt()} BPM",
-                  style = MonospaceMetric.copy(fontSize = 9.sp),
-                  color = StudioCyan,
-                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                )
-              }
+      Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+          text = take.name,
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          color = TextPrimary,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis
+        )
+        if (take.beatTitle.isNotBlank() && take.beatTitle != take.name) {
+          Text(
+            text = "Beat: ${take.beatTitle}",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          Text(
+            text = take.lane,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = AmberGold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+          Text("· ${take.jobType.uppercase()}", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+          if (take.bpm > 0) {
+            Surface(
+              color = StudioCardElevated,
+              shape = RoundedCornerShape(4.dp)
+            ) {
+              Text(
+                text = "${take.bpm.toInt()} BPM",
+                style = MonospaceMetric.copy(fontSize = 9.sp),
+                color = StudioCyan,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+              )
             }
           }
         }
+      }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-          ResultPill(
-            label = "WIN",
-            active = take.result.equals("winner", true),
-            activeColor = StudioWinner,
-            accessibilityLabel = "Mark take ${take.name} as winner"
-          ) {
-            onUpdateResult("winner")
-          }
-          ResultPill(
-            label = "MISS",
-            active = take.result.equals("miss", true),
-            activeColor = StudioMiss,
-            accessibilityLabel = "Mark take ${take.name} as miss"
-          ) {
-            onUpdateResult("miss")
-          }
-          ResultPill(
-            label = "PEND",
-            active = take.result.equals("pending", true),
-            activeColor = StudioPending,
-            accessibilityLabel = "Mark take ${take.name} as pending"
-          ) {
-            onUpdateResult("pending")
-          }
+      Spacer(modifier = Modifier.height(8.dp))
+
+      FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+      ) {
+        ResultPill(
+          label = "WIN",
+          active = take.result.equals("winner", true),
+          activeColor = StudioWinner,
+          accessibilityLabel = "Mark take ${take.name} as winner"
+        ) {
+          onUpdateResult("winner")
+        }
+        ResultPill(
+          label = "MISS",
+          active = take.result.equals("miss", true),
+          activeColor = StudioMiss,
+          accessibilityLabel = "Mark take ${take.name} as miss"
+        ) {
+          onUpdateResult("miss")
+        }
+        ResultPill(
+          label = "PEND",
+          active = take.result.equals("pending", true),
+          activeColor = StudioPending,
+          accessibilityLabel = "Mark take ${take.name} as pending"
+        ) {
+          onUpdateResult("pending")
         }
       }
 
@@ -766,12 +799,45 @@ private fun TakeItemCard(
         shape = RoundedCornerShape(6.dp),
         modifier = Modifier.fillMaxWidth()
       ) {
-        Text(
-          text = take.style.take(160) + if (take.style.length > 160) "..." else "",
-          style = MonospacePrompt.copy(fontSize = 12.sp),
-          color = TextSecondary,
-          modifier = Modifier.padding(8.dp)
-        )
+        Column(modifier = Modifier.padding(8.dp)) {
+          Text(
+            text = if (showFullPrompts || take.style.length <= 160) {
+              take.style
+            } else {
+              "${take.style.take(160)}..."
+            },
+            style = MonospacePrompt.copy(fontSize = 12.sp),
+            color = TextSecondary
+          )
+          if (showFullPrompts) {
+            if (take.excludeText.isNotBlank()) {
+              Spacer(modifier = Modifier.height(6.dp))
+              Text("EXCLUDE:", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+              Text(take.excludeText, style = MonospacePrompt.copy(fontSize = 11.sp), color = TextMuted)
+            }
+            if (take.lyrics.isNotBlank()) {
+              Spacer(modifier = Modifier.height(6.dp))
+              Text("LYRICS MAP:", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+              Text(take.lyrics, style = MonospacePrompt.copy(fontSize = 11.sp), color = TextSecondary)
+            }
+          }
+          val hasExtraPromptContent = take.style.length > 160 || take.excludeText.isNotBlank() || take.lyrics.isNotBlank()
+          if (hasExtraPromptContent) {
+            TextButton(
+              onClick = { showFullPrompts = !showFullPrompts },
+              contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+              modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .testTag("action_toggle_take_expand_${take.id}")
+            ) {
+              Text(
+                text = if (showFullPrompts) "Hide Full Prompts ▲" else "View Full Prompts ▾",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = StudioCyan
+              )
+            }
+          }
+        }
       }
 
       Spacer(modifier = Modifier.height(8.dp))

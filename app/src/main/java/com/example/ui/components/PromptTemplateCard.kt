@@ -3,6 +3,8 @@ package com.example.ui.components
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
@@ -52,13 +55,15 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PromptTemplateCard(
   template: PromptTemplateEntity,
   onApply: () -> Unit,
   onTogglePin: () -> Unit,
   onDelete: () -> Unit,
-  modifier: Modifier = Modifier
+  modifier: Modifier = Modifier,
+  onDuplicate: (() -> Unit)? = null
 ) {
   val isPreserve = JobType.fromString(template.jobType) == JobType.PRESERVE
 
@@ -80,10 +85,12 @@ fun PromptTemplateCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
+        FlowRow(
           horizontalArrangement = Arrangement.spacedBy(6.dp),
-          modifier = Modifier.weight(1f)
+          verticalArrangement = Arrangement.spacedBy(4.dp),
+          modifier = Modifier
+            .weight(1f)
+            .padding(end = 4.dp)
         ) {
           Surface(
             color = if (isPreserve) AmberContainer else CyanContainer,
@@ -93,7 +100,8 @@ fun PromptTemplateCard(
               text = template.category,
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
               color = if (isPreserve) AmberGold else StudioCyan,
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+              maxLines = 1
             )
           }
           Surface(
@@ -104,14 +112,16 @@ fun PromptTemplateCard(
               text = if (isPreserve) "Preserve" else "Original",
               style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
               color = TextSecondary,
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+              maxLines = 1
             )
           }
           if (template.bpmHint.isNotBlank()) {
             Text(
               text = template.bpmHint,
               style = MonospaceMetric.copy(fontSize = 10.sp),
-              color = AmberGold
+              color = AmberGold,
+              maxLines = 1
             )
           }
         }
@@ -134,6 +144,21 @@ fun PromptTemplateCard(
               tint = if (template.isPinned) AmberGold else TextSecondary,
               modifier = Modifier.size(18.dp)
             )
+          }
+          if (onDuplicate != null) {
+            IconButton(
+              onClick = onDuplicate,
+              modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .testTag("template_duplicate_${template.id}")
+            ) {
+              Icon(
+                imageVector = Icons.Default.ContentCopy,
+                contentDescription = "Duplicate template ${template.title}",
+                tint = StudioCyan,
+                modifier = Modifier.size(17.dp)
+              )
+            }
           }
           IconButton(
             onClick = onDelete,

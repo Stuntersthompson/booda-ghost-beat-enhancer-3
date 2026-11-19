@@ -66,6 +66,12 @@ enum class StudioTab(val title: String) {
   ADVISOR("Advisor")
 }
 
+enum class RandomizeScope(val label: String) {
+  FULL("Full Studio"),
+  DRUMS_AND_EXCLUDE("Drums & Exclude"),
+  SLIDERS_ONLY("Sliders Only")
+}
+
 data class EnvironmentStatus(
   val isOnline: Boolean,
   val isFirebaseReady: Boolean
@@ -160,6 +166,11 @@ class MainViewModel(
 
   private val _templateCategoryFilter = MutableStateFlow(savedStateHandle.get<String>(KEY_TEMPLATE_CATEGORY) ?: "All")
   val templateCategoryFilter: StateFlow<String> = _templateCategoryFilter.asStateFlow()
+
+  private val _appliedTemplateId = MutableStateFlow<Long?>(null)
+  val appliedTemplateId: StateFlow<Long?> = _appliedTemplateId.asStateFlow()
+
+  private var lastSlotTemplateIdx: Int = -1
 
   // Navigation
   private val _currentTab = MutableStateFlow(StudioTab.BUILD)
@@ -390,45 +401,54 @@ class MainViewModel(
 
   fun setLane(lane: String) {
     _activeLane.value = lane
+    _appliedTemplateId.value = null
     savedStateHandle[KEY_LANE] = lane
     val drums = bankRepo.laneDrums(lane)
-    if (_jobType.value == JobType.PRESERVE) {
-      _stylePrompt.value = "$LOCK_LINE. Add $lane drums underneath only ($drums), spice only, sample stays lead."
+    val rawStyle = if (_jobType.value == JobType.PRESERVE) {
+      "$LOCK_LINE. Add $lane drums underneath only ($drums), spice only, sample stays lead."
     } else {
-      _stylePrompt.value = "$lane instrumental, $drums, high energy, crisp mix."
+      "$lane instrumental, $drums, high energy, crisp mix."
     }
+    _stylePrompt.value = rawStyle.take(STYLE_LIMIT)
     savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
-    _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value)
+    _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value).take(LYRICS_LIMIT)
     savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
     updateSimplePrompt()
+    resetHandoffSteps()
   }
 
   fun updateStylePrompt(text: String) {
-    _stylePrompt.value = text
-    savedStateHandle[KEY_STYLE_PROMPT] = text
+    val clamped = text.take(STYLE_LIMIT)
+    _stylePrompt.value = clamped
+    _appliedTemplateId.value = null
+    savedStateHandle[KEY_STYLE_PROMPT] = clamped
     resetHandoffSteps()
   }
 
   fun updateLyricsMap(text: String) {
-    _lyricsMap.value = text
-    savedStateHandle[KEY_LYRICS_MAP] = text
+    val clamped = text.take(LYRICS_LIMIT)
+    _lyricsMap.value = clamped
+    _appliedTemplateId.value = null
+    savedStateHandle[KEY_LYRICS_MAP] = clamped
     resetHandoffSteps()
   }
 
   fun updateExcludeText(text: String) {
-    _excludeText.value = text
-    savedStateHandle[KEY_EXCLUDE_TEXT] = text
+    val clamped = text.take(EXCLUDE_LIMIT)
+    _excludeText.value = clamped
+    _appliedTemplateId.value = null
+    savedStateHandle[KEY_EXCLUDE_TEXT] = clamped
     resetHandoffSteps()
   }
 
   fun updateSimplePrompt(text: String? = null) {
-    if (text != null) {
-      _simplePrompt.value = text
+    val nextPrompt = if (text != null) {
+      text.take(SIMPLE_WORKING_LIMIT)
     } else {
       val lane = _activeLane.value
       val drums = bankRepo.laneDrums(lane)
-      if (_jobType.value == JobType.PRESERVE) {
-        _simplePrompt.value = """$LOCK_LINE. Turn this uploaded beat into a hard-hitting $lane canvas remix. Add $drums underneath only. Keep original sample and vocals 100% leading.
+      val raw = if (_jobType.value == JobType.PRESERVE) {
+        """$LOCK_LINE. Turn this uploaded beat into a hard-hitting $lane canvas remix. Add $drums underneath only. Keep original sample and vocals 100% leading.
 [Instrumental]
 [Intro] (uploaded sample plays solo exactly as performed, canvas drums out)
 [Verse 1] (canvas drums in only — $drums, sample untouched)
@@ -439,7 +459,7 @@ class MainViewModel(
 [Outro] (canvas drums fade, sample plays out alone to a tape stop finish)
 [End]"""
       } else {
-        _simplePrompt.value = """High-energy $lane instrumental, $drums, heavy 808 bass, crisp percussion.
+        """High-energy $lane instrumental, $drums, heavy 808 bass, crisp percussion.
 [Instrumental]
 [Intro] (melodic hook establishes mood)
 [Verse 1] (full drum groove enters — $drums)
@@ -450,8 +470,49 @@ class MainViewModel(
 [Outro] (drums fade to clean finish)
 [End]"""
       }
+      raw.take(SIMPLE_WORKING_LIMIT)
     }
-    savedStateHandle[KEY_SIMPLE_PROMPT] = _simplePrompt.value
+    _simplePrompt.value = nextPrompt
+    savedStateHandle[KEY_SIMPLE_PROMPT] = nextPrompt
+  }
+
+  fun sendSimplePromptToBuild(context: Context? = null) {
+    val raw = _simplePrompt.value.trim()
+    if (raw.isBlank()) return
+    val firstTagIdx = raw.indexOf('[')
+    val stylePart = (if (firstTagIdx > 0) raw.substring(0, firstTagIdx) else raw.lines().firstOrNull().orEmpty())
+      .let { SunoComplianceAuditor.stripArtistNames(it) }
+      .trim()
+    val lyricsPart = if (firstTagIdx >= 0) raw.substring(firstTagIdx).trim() else ""
+
+    val finalStyle = if (_jobType.value == JobType.PRESERVE && !stylePart.contains(LOCK_LINE)) {
+      val prefix = "$LOCK_LINE. "
+      val budget = (STYLE_LIMIT - prefix.length).coerceAtLeast(0)
+      if (stylePart.isBlank()) "${prefix}Add ${_activeLane.value} drums underneath only."
+      else "$prefix${stylePart.take(budget).trimEnd()}"
+    } else {
+      stylePart.ifBlank { "${_activeLane.value} instrumental" }.take(STYLE_LIMIT)
+    }
+
+    _stylePrompt.value = finalStyle
+    savedStateHandle[KEY_STYLE_PROMPT] = finalStyle
+    if (lyricsPart.isNotBlank()) {
+      val normalizedLyrics = if (lyricsPart.endsWith("[End]")) {
+        lyricsPart.take(LYRICS_LIMIT)
+      } else {
+        val body = lyricsPart.take((LYRICS_LIMIT - 6).coerceAtLeast(0)).trimEnd()
+        "$body\n[End]"
+      }
+      _lyricsMap.value = normalizedLyrics
+      savedStateHandle[KEY_LYRICS_MAP] = normalizedLyrics
+    }
+    _appliedTemplateId.value = null
+    resetHandoffSteps()
+    recordGeneratedPrompt(finalStyle, source = "Simple->Build", lane = _activeLane.value)
+    setTab(StudioTab.BUILD)
+    if (context != null) {
+      Toast.makeText(context, "Loaded Simple prompt into Build boxes", Toast.LENGTH_SHORT).show()
+    }
   }
 
   fun setVariety(v: Int) {
@@ -481,55 +542,116 @@ class MainViewModel(
   fun selectExcludeBank(name: String) {
     val bank = bankRepo.excludeBanks.find { it.name.equals(name, ignoreCase = true) }
     if (bank != null) {
-      _excludeText.value = bank.text
-      savedStateHandle[KEY_EXCLUDE_TEXT] = bank.text
+      val clamped = bank.text.take(EXCLUDE_LIMIT)
+      _excludeText.value = clamped
+      _appliedTemplateId.value = null
+      savedStateHandle[KEY_EXCLUDE_TEXT] = clamped
+      resetHandoffSteps()
     }
   }
 
-  fun injectSlotTemplate() {
+  fun injectSlotTemplate(templateIndex: Int? = null, context: Context? = null) {
     val templates = bankRepo.slotTemplates
     if (templates.isEmpty()) return
-    val tmpl = templates.random()
-    val drums = bankRepo.laneDrums(_activeLane.value)
+    val pickedIdx = when {
+      templateIndex != null && templateIndex in templates.indices -> templateIndex
+      templates.size == 1 -> 0
+      else -> {
+        val next = (lastSlotTemplateIdx + 1) % templates.size
+        next
+      }
+    }
+    lastSlotTemplateIdx = pickedIdx
+    val tmpl = templates[pickedIdx]
+    val lane = _activeLane.value
+    val drums = bankRepo.laneDrums(lane)
+    val exp = bankRepo.expansionLanes.find { it.name.equals(lane, ignoreCase = true) }
+    val fw = bankRepo.frameworks[lane]
+    val move808 = exp?.bassProfile ?: when {
+      lane.contains("drill", ignoreCase = true) -> "sliding 808 glides"
+      lane.contains("boom", ignoreCase = true) || lane.contains("jazz", ignoreCase = true) -> "warm upright sub weight"
+      else -> "tuned rolling 808 sub"
+    }
+    val texture = exp?.styleHint ?: fw?.signature ?: "analog warmth texture"
+
     val replaced = tmpl.text
       .replace("[DRUM MOVE]", drums)
-      .replace("[808 MOVE]", "tuned rolling 808 sub")
-      .replace("[TEXTURE]", "analog warmth texture")
-      .replace("[GENRE]", _activeLane.value)
-    _stylePrompt.value = replaced
+      .replace("[808 MOVE]", move808)
+      .replace("[TEXTURE]", texture)
+      .replace("[GENRE]", lane)
+    _stylePrompt.value = SunoComplianceAuditor.stripArtistNames(replaced).take(STYLE_LIMIT)
     if (_jobType.value == JobType.PRESERVE) ensureLockLineInStyle()
+    _appliedTemplateId.value = null
     savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
-    recordGeneratedPrompt(_stylePrompt.value, source = "Slot Inject")
+    updateSimplePrompt()
+    resetHandoffSteps()
+    recordGeneratedPrompt(_stylePrompt.value, source = "Slot Inject", lane = lane)
+    if (context != null) {
+      Toast.makeText(context, "Injected slot template #${pickedIdx + 1} ($lane)", Toast.LENGTH_SHORT).show()
+    }
   }
 
-  fun randomizeAll() {
+  fun randomizeAll(scope: RandomizeScope = RandomizeScope.FULL, context: Context? = null) {
     val lanePool = bankRepo.allLanes.ifEmpty { bankRepo.expansionLanes.map { it.name } }
-    val lane = lanePool.random()
-    _activeLane.value = lane
-    savedStateHandle[KEY_LANE] = lane
-    val drums = bankRepo.laneDrums(lane)
-    if (_jobType.value == JobType.PRESERVE) {
-      _stylePrompt.value = "$LOCK_LINE. Add $lane drums underneath only ($drums), spice only, sample stays lead."
-      setAudioInfluence(Random.nextInt(75, 86))
-      setWeirdness(Random.nextInt(20, 31))
-      setStyleInfluence(Random.nextInt(65, 76))
-      setVariety(0)
+    val lane = if (scope == RandomizeScope.FULL && lanePool.size > 1) {
+      lanePool.filter { it != _activeLane.value }.random()
+    } else if (scope == RandomizeScope.FULL) {
+      lanePool.firstOrNull() ?: _activeLane.value
     } else {
-      _stylePrompt.value = "$lane instrumental, $drums, crisp modern mix."
-      setAudioInfluence(0)
-      setWeirdness(Random.nextInt(15, 26))
-      setStyleInfluence(Random.nextInt(60, 71))
-      setVariety(0)
+      _activeLane.value
     }
-    savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
-    _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value)
-    savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
-    if (bankRepo.excludeBanks.isNotEmpty()) {
-      _excludeText.value = bankRepo.excludeBanks.random().text
-      savedStateHandle[KEY_EXCLUDE_TEXT] = _excludeText.value
+
+    if (scope == RandomizeScope.FULL) {
+      _activeLane.value = lane
+      savedStateHandle[KEY_LANE] = lane
     }
+
+    if (scope == RandomizeScope.FULL || scope == RandomizeScope.DRUMS_AND_EXCLUDE) {
+      val drums = bankRepo.laneDrums(lane)
+      val exp = bankRepo.expansionLanes.find { it.name.equals(lane, ignoreCase = true) }
+      val sig = bankRepo.frameworks[lane]?.signature ?: exp?.styleHint ?: "crisp stereo punch"
+      val nextStyle = if (_jobType.value == JobType.PRESERVE) {
+        "$LOCK_LINE. Add $lane drums underneath only ($drums, $sig), spice only, sample stays lead."
+      } else {
+        "$lane instrumental, $drums, $sig, crisp modern mix."
+      }
+      _stylePrompt.value = SunoComplianceAuditor.stripArtistNames(nextStyle).take(STYLE_LIMIT)
+      savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
+      if (bankRepo.excludeBanks.isNotEmpty()) {
+        val nextExclude = bankRepo.excludeBanks
+          .filter { it.text != _excludeText.value || bankRepo.excludeBanks.size == 1 }
+          .random().text.take(EXCLUDE_LIMIT)
+        _excludeText.value = nextExclude
+        savedStateHandle[KEY_EXCLUDE_TEXT] = nextExclude
+      }
+    }
+
+    if (scope == RandomizeScope.FULL) {
+      _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value).take(LYRICS_LIMIT)
+      savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
+    }
+
+    if (scope == RandomizeScope.FULL || scope == RandomizeScope.SLIDERS_ONLY) {
+      if (_jobType.value == JobType.PRESERVE) {
+        setAudioInfluence(Random.nextInt(75, 86))
+        setWeirdness(Random.nextInt(20, 31))
+        setStyleInfluence(Random.nextInt(65, 76))
+        setVariety(0)
+      } else {
+        setAudioInfluence(0)
+        setWeirdness(Random.nextInt(15, 28))
+        setStyleInfluence(Random.nextInt(60, 74))
+        setVariety(0)
+      }
+    }
+
+    _appliedTemplateId.value = null
     updateSimplePrompt()
+    resetHandoffSteps()
     recordGeneratedPrompt(_stylePrompt.value, source = "Randomize", lane = lane)
+    if (context != null) {
+      Toast.makeText(context, "Randomized ${scope.label}: $lane", Toast.LENGTH_SHORT).show()
+    }
   }
 
   private fun ensureLockLineInStyle() {
@@ -544,6 +666,9 @@ class MainViewModel(
         if (clippedBody.isEmpty()) LOCK_LINE else "$prefix$clippedBody"
       }
       savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
+    } else if (_stylePrompt.value.length > STYLE_LIMIT) {
+      _stylePrompt.value = _stylePrompt.value.take(STYLE_LIMIT)
+      savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
     }
   }
 
@@ -552,17 +677,39 @@ class MainViewModel(
       .replace("$LOCK_LINE. ", "")
       .replace(LOCK_LINE, "")
       .trim()
+      .take(STYLE_LIMIT)
     savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
+  }
+
+  fun resetSlidersForCurrentJob(context: Context? = null) {
+    if (_jobType.value == JobType.PRESERVE) {
+      setVariety(0)
+      setWeirdness(25)
+      setStyleInfluence(70)
+      setAudioInfluence(80)
+    } else {
+      setVariety(0)
+      setWeirdness(20)
+      setStyleInfluence(65)
+      setAudioInfluence(0)
+    }
+    resetHandoffSteps()
+    persistAllCoreState()
+    if (context != null) {
+      val modeName = if (_jobType.value == JobType.PRESERVE) "Preserve" else "Original"
+      Toast.makeText(context, "Calibrated sliders for $modeName mode", Toast.LENGTH_SHORT).show()
+    }
   }
 
   fun resetToPreserveDefaults() {
     _jobType.value = JobType.PRESERVE
     _activeLane.value = "Trap"
+    _appliedTemplateId.value = null
     val drums = bankRepo.laneDrums("Trap")
-    _stylePrompt.value = "$LOCK_LINE. Add Trap drums underneath only ($drums), spice only, sample stays lead."
-    _lyricsMap.value = bankRepo.buildV6LyricsMap("Trap", JobType.PRESERVE)
+    _stylePrompt.value = "$LOCK_LINE. Add Trap drums underneath only ($drums), spice only, sample stays lead.".take(STYLE_LIMIT)
+    _lyricsMap.value = bankRepo.buildV6LyricsMap("Trap", JobType.PRESERVE).take(LYRICS_LIMIT)
     if (bankRepo.excludeBanks.isNotEmpty()) {
-      _excludeText.value = bankRepo.excludeBanks[0].text
+      _excludeText.value = bankRepo.excludeBanks[0].text.take(EXCLUDE_LIMIT)
     }
     _variety.value = 0
     _weirdness.value = 25
@@ -662,6 +809,12 @@ class MainViewModel(
         val result = analyzedClip.result
         _audioAnalysis.value = result
         lastAnalyzedWavBytes = analyzedClip.multimodalWavBytes
+        if (!result.isAudioMeasured) {
+          _audioError.value = result.analysisNote ?: "Could not decode readable PCM audio from $fileName."
+          _aiConsultationState.value = AiConsultationUiState.Idle
+          _isAnalyzing.value = false
+          return@launch
+        }
         val fallbackMs = (result.durationSec * 1000.0).toLong().coerceAtLeast(1000L)
         audioPlayer.loadUri(getApplication(), uri, fallbackMs)
         _isAnalyzing.value = false
@@ -920,34 +1073,47 @@ class MainViewModel(
     }
   }
 
-  fun applyTranscriptToLyrics(transcript: String, context: Context? = null) {
+  fun applyTranscriptToLyrics(
+    transcript: String,
+    sectionTag: String = "Hook (Dictated)",
+    replaceExisting: Boolean = false,
+    context: Context? = null
+  ) {
     val clean = transcript.trim()
     if (clean.isEmpty()) return
-    val current = _lyricsMap.value.trimEnd()
-    val hasEnd = current.endsWith("[End]")
-    val body = if (hasEnd) current.removeSuffix("[End]").trimEnd() else current
-    val inserted = buildString {
-      if (body.isNotBlank()) {
-        append(body)
+    val cleanTag = sectionTag.trim().trimStart('[').trimEnd(']').ifEmpty { "Hook (Dictated)" }
+    val baseBody = if (replaceExisting) {
+      ""
+    } else {
+      val current = _lyricsMap.value.trimEnd()
+      if (current.endsWith("[End]")) current.removeSuffix("[End]").trimEnd() else current
+    }
+    val insertionLine = "[$cleanTag] $clean"
+    val suffix = "\n[End]"
+    val bodyBudget = (LYRICS_LIMIT - suffix.length).coerceAtLeast(0)
+    val combinedBody = buildString {
+      if (baseBody.isNotBlank()) {
+        append(baseBody)
         append("\n")
       }
-      append("[Hook (Dictated)] ")
-      append(clean)
-      append("\n[End]")
-    }.take(LYRICS_LIMIT)
-    val finalMap = if (inserted.trimEnd().endsWith("[End]")) inserted else {
-      inserted.take((LYRICS_LIMIT - 6).coerceAtLeast(0)).trimEnd() + "\n[End]"
-    }
+      append(insertionLine)
+    }.take(bodyBudget).trimEnd()
+    val finalMap = if (combinedBody.isBlank()) "[End]" else "$combinedBody$suffix"
     updateLyricsMap(finalMap)
     if (context != null) {
-      Toast.makeText(context, "Inserted transcribed hook into Lyrics Box", Toast.LENGTH_SHORT).show()
+      val verb = if (replaceExisting) "Replaced" else "Inserted"
+      Toast.makeText(context, "$verb [$cleanTag] in Lyrics Box", Toast.LENGTH_SHORT).show()
     }
   }
 
-  fun applyTranscriptToStyle(transcript: String, context: Context? = null) {
-    val clean = transcript.trim()
+  fun applyTranscriptToStyle(
+    transcript: String,
+    replaceExisting: Boolean = false,
+    context: Context? = null
+  ) {
+    val clean = SunoComplianceAuditor.stripArtistNames(transcript.trim())
     if (clean.isEmpty()) return
-    val current = _stylePrompt.value.trim()
+    val current = if (replaceExisting) "" else _stylePrompt.value.trim()
     val combined = if (current.isBlank()) clean else "$current, $clean"
     val finalStyle = if (_jobType.value == JobType.PRESERVE && !combined.contains(LOCK_LINE)) {
       val prefix = "$LOCK_LINE. "
@@ -958,8 +1124,9 @@ class MainViewModel(
       combined.take(STYLE_LIMIT)
     }
     updateStylePrompt(finalStyle)
+    recordGeneratedPrompt(finalStyle, source = "Dictate Style", lane = _activeLane.value)
     if (context != null) {
-      Toast.makeText(context, "Added voice note to Style Prompt", Toast.LENGTH_SHORT).show()
+      Toast.makeText(context, "Updated Style Prompt from dictation", Toast.LENGTH_SHORT).show()
     }
   }
 
@@ -1143,6 +1310,7 @@ class MainViewModel(
 
   fun applyBpmMatchedLanePreset(lane: String, overrideBpm: Double? = null) {
     _activeLane.value = lane
+    _appliedTemplateId.value = null
     savedStateHandle[KEY_LANE] = lane
     val drums = bankRepo.laneDrums(lane)
     val analyzed = _audioAnalysis.value
@@ -1151,20 +1319,24 @@ class MainViewModel(
     val keyTag = analyzed?.keyName?.takeIf { it.isNotBlank() }?.let { " in $it" } ?: ""
 
     if (_jobType.value == JobType.PRESERVE) {
-      _stylePrompt.value = "$LOCK_LINE. Add $lane drums underneath only ($drums)$bpmTag$keyTag, spice only, sample stays lead."
+      _stylePrompt.value = SunoComplianceAuditor.stripArtistNames(
+        "$LOCK_LINE. Add $lane drums underneath only ($drums)$bpmTag$keyTag, spice only, sample stays lead."
+      ).take(STYLE_LIMIT)
       setVariety(0)
       setWeirdness(25)
       setStyleInfluence(70)
       setAudioInfluence(80)
     } else {
-      _stylePrompt.value = "$lane instrumental$bpmTag$keyTag, $drums, high energy, crisp mix."
+      _stylePrompt.value = SunoComplianceAuditor.stripArtistNames(
+        "$lane instrumental$bpmTag$keyTag, $drums, high energy, crisp mix."
+      ).take(STYLE_LIMIT)
       setVariety(0)
       setWeirdness(20)
       setStyleInfluence(65)
       setAudioInfluence(0)
     }
     savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
-    _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value)
+    _lyricsMap.value = bankRepo.buildV6LyricsMap(lane, _jobType.value).take(LYRICS_LIMIT)
     savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
     updateSimplePrompt()
     resetHandoffSteps()
@@ -1178,14 +1350,19 @@ class MainViewModel(
 
   fun adjustBpmMultiplier(multiplier: Double) {
     val current = _audioAnalysis.value ?: return
+    val curBpm = current.bpm ?: return
     if (multiplier.isNaN() || multiplier.isInfinite() || multiplier <= 0.0) return
-    val curBpm = current.bpm ?: 130.0
     val newBpm = (curBpm * multiplier).coerceIn(40.0, 260.0)
     val roundedBpm = kotlin.math.round(newBpm * 10.0) / 10.0
-    val lowTag = if (current.lowShare > 0.36) "Sub-heavy" else "Balanced"
+    val toneTag = if (!current.isSpectralMeasured) {
+      "Spectrum Unread"
+    } else {
+      val lowTag = if (current.lowShare > 0.36) "Sub-heavy" else "Balanced"
+      "${if (current.centroidHz > 2800) "Bright" else "Dark"} · $lowTag"
+    }
     _audioAnalysis.value = current.copy(
       bpm = roundedBpm,
-      pocketLabel = "${roundedBpm.toInt()} BPM · ${if (current.centroidHz > 2800) "Bright" else "Dark"} · $lowTag"
+      pocketLabel = "${roundedBpm.toInt()} BPM · $toneTag"
     )
   }
 
@@ -1203,11 +1380,8 @@ class MainViewModel(
   fun sendAnalysisToBuild() {
     val a = _audioAnalysis.value ?: return
     setLane(a.suggestedLane)
-    if (_jobType.value == JobType.PRESERVE) {
-      _stylePrompt.value = a.promptPreserve
-    } else {
-      _stylePrompt.value = a.promptOriginal
-    }
+    val nextStyle = if (_jobType.value == JobType.PRESERVE) a.promptPreserve else a.promptOriginal
+    _stylePrompt.value = nextStyle.take(STYLE_LIMIT)
     savedStateHandle[KEY_STYLE_PROMPT] = _stylePrompt.value
     recordGeneratedPrompt(
       prompt = _stylePrompt.value,
@@ -1221,12 +1395,13 @@ class MainViewModel(
   fun sendAnalysisToSimple() {
     val a = _audioAnalysis.value ?: return
     setLane(a.suggestedLane)
-    _simplePrompt.value = if (_jobType.value == JobType.PRESERVE) {
+    val bpmPhrase = a.bpm?.toInt()?.let { "at $it BPM, " } ?: ""
+    val rawSimple = if (_jobType.value == JobType.PRESERVE) {
       """${a.promptPreserve}
 [Instrumental]
 [Intro] (uploaded sample plays solo exactly as performed)
 [Verse 1] (canvas drums enter under sample — ${bankRepo.laneDrums(a.suggestedLane)})
-[Chorus 1] (full canvas drop at ${a.bpm?.toInt() ?: 130} BPM, 808 weight)
+[Chorus 1] (full canvas drop ${bpmPhrase}heavy 808 weight)
 [Breakdown] (sample plays solo untouched)
 [Chorus 2] (heaviest drop, full bounce)
 [Outro] (canvas strips back to sample solo finish)
@@ -1235,13 +1410,14 @@ class MainViewModel(
       """${a.promptOriginal}
 [Instrumental]
 [Intro] (main melodic motif establishes atmosphere)
-[Verse 1] (full groove enters at ${a.bpm?.toInt() ?: 130} BPM)
+[Verse 1] (full groove enters ${bpmPhrase}tight pocket)
 [Chorus 1] (maximum hook energy, punchy 808)
 [Breakdown] (drums out, melody only)
 [Chorus 2] (final heaviest drop)
 [Outro] (fade to clean finish)
 [End]"""
     }
+    _simplePrompt.value = rawSimple.take(SIMPLE_WORKING_LIMIT)
     savedStateHandle[KEY_SIMPLE_PROMPT] = _simplePrompt.value
     setTab(StudioTab.SIMPLE)
   }
@@ -1360,6 +1536,7 @@ class MainViewModel(
     if (template.lane.isNotBlank()) {
       _activeLane.value = template.lane
     }
+    _appliedTemplateId.value = if (template.id > 0L) template.id else null
     _stylePrompt.value = template.stylePrompt.take(STYLE_LIMIT)
     _lyricsMap.value = template.lyricsMap.ifBlank {
       bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJob)
@@ -1387,6 +1564,56 @@ class MainViewModel(
     }
   }
 
+  fun duplicatePromptTemplate(template: PromptTemplateEntity, context: Context? = null) {
+    val copyTitle = "${template.title} Copy".take(60)
+    viewModelScope.launch(Dispatchers.IO) {
+      promptTemplateRepo.saveTemplate(
+        title = copyTitle,
+        category = template.category,
+        lane = template.lane,
+        jobType = JobType.fromString(template.jobType),
+        bpmHint = template.bpmHint,
+        stylePrompt = template.stylePrompt,
+        lyricsMap = template.lyricsMap,
+        excludeText = template.excludeText,
+        variety = template.variety,
+        weirdness = template.weirdness,
+        styleInfluence = template.styleInfluence,
+        audioInfluence = template.audioInfluence,
+        isPinned = true
+      )
+    }
+    if (context != null) {
+      Toast.makeText(context, "Saved copy '$copyTitle'", Toast.LENGTH_SHORT).show()
+    }
+  }
+
+  fun saveHistoryEntryAsTemplate(entry: PromptHistoryEntity, context: Context? = null) {
+    val lane = entry.lane.ifBlank { _activeLane.value }
+    val job = JobType.fromString(entry.jobType)
+    val title = "${entry.source} · $lane".take(60)
+    viewModelScope.launch(Dispatchers.IO) {
+      promptTemplateRepo.saveTemplate(
+        title = title,
+        category = lane.ifBlank { "Custom" },
+        lane = lane,
+        jobType = job,
+        bpmHint = entry.bpm?.let { "$it BPM" } ?: "",
+        stylePrompt = entry.prompt.take(STYLE_LIMIT),
+        lyricsMap = bankRepo.buildV6LyricsMap(lane, job),
+        excludeText = _excludeText.value,
+        variety = _variety.value,
+        weirdness = _weirdness.value,
+        styleInfluence = _styleInfluence.value,
+        audioInfluence = if (job == JobType.PRESERVE) _audioInfluence.value else 0,
+        isPinned = true
+      )
+    }
+    if (context != null) {
+      Toast.makeText(context, "Saved variation to Quick Templates", Toast.LENGTH_SHORT).show()
+    }
+  }
+
   fun applyStylePromptFromBank(prompt: StylePrompt, context: Context? = null) {
     val resolvedJob = when (prompt.track) {
       2 -> JobType.PRESERVE
@@ -1394,6 +1621,7 @@ class MainViewModel(
       else -> _jobType.value
     }
     _jobType.value = resolvedJob
+    _appliedTemplateId.value = null
     if (prompt.subgenre.isNotBlank() && bankRepo.allLanes.contains(prompt.subgenre)) {
       _activeLane.value = prompt.subgenre
     }
@@ -1403,7 +1631,7 @@ class MainViewModel(
       prompt.text
     }
     _stylePrompt.value = appliedStyle.take(STYLE_LIMIT)
-    _lyricsMap.value = bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJob)
+    _lyricsMap.value = bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJob).take(LYRICS_LIMIT)
     if (resolvedJob == JobType.PRESERVE) {
       _audioInfluence.value = 80
     } else if (prompt.track == 1) {
@@ -1430,7 +1658,7 @@ class MainViewModel(
       _audioAnalysis.value?.bpm?.let { "${it.toInt()} BPM" } ?: ""
     }
     viewModelScope.launch(Dispatchers.IO) {
-      promptTemplateRepo.saveTemplate(
+      val savedId = promptTemplateRepo.saveTemplate(
         title = cleanTitle,
         category = cleanCategory,
         lane = _activeLane.value,
@@ -1444,6 +1672,7 @@ class MainViewModel(
         styleInfluence = _styleInfluence.value,
         audioInfluence = _audioInfluence.value
       )
+      _appliedTemplateId.value = savedId
     }
     if (context != null) {
       Toast.makeText(context, "Saved '$cleanTitle' to Templates", Toast.LENGTH_SHORT).show()
@@ -1459,6 +1688,9 @@ class MainViewModel(
   fun deletePromptTemplate(template: PromptTemplateEntity) {
     viewModelScope.launch(Dispatchers.IO) {
       promptTemplateRepo.deleteById(template.id)
+      if (_appliedTemplateId.value == template.id) {
+        _appliedTemplateId.value = null
+      }
     }
   }
 
@@ -1574,11 +1806,12 @@ ${_lyricsMap.value}
   ) {
     val resolvedJobType = JobType.fromString(entry.jobType)
     _jobType.value = resolvedJobType
+    _appliedTemplateId.value = null
     if (entry.lane.isNotBlank() && bankRepo.allLanes.contains(entry.lane)) {
       _activeLane.value = entry.lane
     }
-    _stylePrompt.value = entry.prompt
-    _lyricsMap.value = bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJobType)
+    _stylePrompt.value = entry.prompt.take(STYLE_LIMIT)
+    _lyricsMap.value = bankRepo.buildV6LyricsMap(_activeLane.value, resolvedJobType).take(LYRICS_LIMIT)
     updateSimplePrompt()
     resetHandoffSteps()
     if (navigateToBuild) {

@@ -9,10 +9,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +28,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -35,6 +38,7 @@ import com.example.data.model.SIMPLE_WORKING_LIMIT
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SimpleScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
@@ -166,13 +170,18 @@ fun SimpleScreen(viewModel: MainViewModel) {
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          FlowRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
             Text(
               text = "SIMPLE PROMPT BOX",
               style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-              color = AmberGold
+              color = AmberGold,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.width(8.dp))
             Surface(
               color = if (isOverLimit) Color(0x33EF4444) else StudioCardElevated,
               shape = RoundedCornerShape(6.dp)
@@ -181,6 +190,7 @@ fun SimpleScreen(viewModel: MainViewModel) {
                 text = "$chars / $SIMPLE_WORKING_LIMIT c",
                 style = MonospaceMetric.copy(fontSize = 11.sp),
                 color = if (isOverLimit) StudioMiss else StudioCyan,
+                maxLines = 1,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
               )
             }
@@ -230,24 +240,103 @@ fun SimpleScreen(viewModel: MainViewModel) {
           ),
           shape = RoundedCornerShape(8.dp)
         )
+        if (isPreserve && !simplePrompt.contains(LOCK_LINE)) {
+          Spacer(modifier = Modifier.height(10.dp))
+          Surface(
+            color = Color(0x22EF4444),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .border(0.5.dp, StudioMiss.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+          ) {
+            FlowRow(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f, fill = false)
+              ) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = StudioMiss, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = "Preserve mode missing exact sample lock line.",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = StudioMiss
+                )
+              }
+              TextButton(
+                onClick = {
+                  val body = simplePrompt.trimStart()
+                  val prefix = "$LOCK_LINE. "
+                  val next = if (body.isBlank()) prefix.trimEnd() else "$prefix$body"
+                  viewModel.updateSimplePrompt(next.take(SIMPLE_WORKING_LIMIT))
+                },
+                modifier = Modifier
+                  .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                  .testTag("action_simple_insert_lock")
+              ) {
+                Text(
+                  text = "Insert Lock Line",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                  color = AmberGold
+                )
+              }
+            }
+          }
+        }
       }
     }
   }
 
   val primaryCopyButton: @Composable () -> Unit = {
-    Button(
-      onClick = { viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt) },
-      colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
-      shape = RoundedCornerShape(10.dp),
-      modifier = Modifier
-        .fillMaxWidth()
-        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-        .semantics { contentDescription = "Copy full Simple Prompt to clipboard" }
-        .testTag("action_copy_simple_main")
+    Column(
+      modifier = Modifier.fillMaxWidth(),
+      verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-      Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black)
-      Spacer(modifier = Modifier.width(8.dp))
-      Text("Copy Simple Prompt to Clipboard", style = MaterialTheme.typography.titleMedium, color = Color.Black)
+      Button(
+        onClick = { viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt) },
+        colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+          .semantics { contentDescription = "Copy full Simple Prompt to clipboard" }
+          .testTag("action_copy_simple_main")
+      ) {
+        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text = "Copy Simple Prompt to Clipboard",
+          style = MaterialTheme.typography.titleMedium,
+          color = Color.Black,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+      }
+
+      OutlinedButton(
+        onClick = { viewModel.sendSimplePromptToBuild(context) },
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+          .semantics { contentDescription = "Split Simple Prompt into Style and Lyrics boxes in Build" }
+          .testTag("action_send_simple_to_build")
+      ) {
+        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text = "Send to Build (Split Boxes)",
+          style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+          color = StudioCyan,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+      }
     }
   }
 

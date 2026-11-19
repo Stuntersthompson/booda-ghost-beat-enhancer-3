@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Full 288dp Android 12+ splash icon canvas prevents stretching or clipping the 192dp circle mask -->
+    <item
+        android:width="288dp"
+        android:height="288dp">
+        <shape android:shape="rectangle">
+            <size
+                android:width="288dp"
+                android:height="288dp" />
+            <solid android:color="@android:color/transparent" />
+        </shape>
+    </item>
+    <!-- 140dp x 114dp preserves 302:246 ratio with diagonal 180.5dp inside the 192dp splash safe circle -->
+    <item
+        android:width="140dp"
+        android:height="114dp"
+        android:drawable="@drawable/booda_official_logo"
+        android:gravity="center" />
+</layer-list>

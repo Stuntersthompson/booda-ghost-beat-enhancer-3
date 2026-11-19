@@ -15,7 +15,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterAltOff
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
@@ -29,15 +28,19 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.repository.PromptBankRepository
+import com.example.ui.components.BrandLogoImage
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.StudioTab
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LanesScreen(viewModel: MainViewModel) {
   val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
@@ -308,13 +311,13 @@ fun LanesScreen(viewModel: MainViewModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
       ) {
-        Icon(
-          imageVector = Icons.Default.SearchOff,
-          contentDescription = null,
-          tint = TextMuted,
-          modifier = Modifier.size(40.dp)
+        BrandLogoImage(
+          height = 72.dp,
+          contentDescription = "BooDa Beat Enhancer official logo",
+          framed = true,
+          modifier = Modifier.testTag("lanes_empty_logo")
         )
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         Text(
           text = if (debouncedSearchQuery.isNotBlank()) {
             "NO LANES MATCH \"${debouncedSearchQuery.trim().take(24)}\""
@@ -365,19 +368,29 @@ fun LanesScreen(viewModel: MainViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.weight(1f)
+            ) {
               Icon(Icons.Default.Speed, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(16.dp))
               Spacer(modifier = Modifier.width(6.dp))
               Text(
                 text = "MATCH BEAT BPM ($detectedBpm BPM)",
                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = StudioCyan
+                color = StudioCyan,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-              text = audioAnalysis!!.fileName.take(18),
+              text = audioAnalysis!!.fileName,
               style = MaterialTheme.typography.labelSmall,
-              color = TextMuted
+              color = TextMuted,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+              textAlign = TextAlign.End,
+              modifier = Modifier.widthIn(max = 120.dp)
             )
           }
 
@@ -448,10 +461,19 @@ fun LanesScreen(viewModel: MainViewModel) {
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f).padding(end = 6.dp)
+          ) {
             Icon(Icons.Default.Tune, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("SIDE-BY-SIDE LANE COMPARISON", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+            Text(
+              text = "SIDE-BY-SIDE LANE COMPARISON",
+              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+              color = StudioCyan,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
           }
           if (!forceExpanded) {
             TextButton(
@@ -487,7 +509,13 @@ fun LanesScreen(viewModel: MainViewModel) {
                   .semantics { contentDescription = "Select Lane A for comparison, currently $laneA" },
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
               ) {
-                Text(laneA.take(16), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+                Text(
+                  text = laneA,
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                  color = AmberGold,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
               }
               DropdownMenu(expanded = showDropdownA, onDismissRequest = { showDropdownA = false }) {
                 allLanes.forEach { l ->
@@ -506,7 +534,13 @@ fun LanesScreen(viewModel: MainViewModel) {
                   .semantics { contentDescription = "Select Lane B for comparison, currently $laneB" },
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
               ) {
-                Text(laneB.take(16), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+                Text(
+                  text = laneB,
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                  color = StudioCyan,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
               }
               DropdownMenu(expanded = showDropdownB, onDismissRequest = { showDropdownB = false }) {
                 allLanes.forEach { l ->
@@ -697,12 +731,19 @@ private fun ComparisonLaneColumn(
           .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
           .semantics { contentDescription = "Use $lane as active subgenre lane" }
       ) {
-        Text("Use $lane", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = Color.Black, maxLines = 1)
+        Text(
+          text = "Use $lane",
+          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+          color = Color.Black,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
       }
     }
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LaneCatalogCard(
   lane: String,
@@ -737,12 +778,17 @@ private fun LaneCatalogCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Column(modifier = Modifier.weight(1f)) {
-          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+          FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
             Text(
               text = lane,
               style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-              color = if (isSelected) AmberGold else TextPrimary
+              color = if (isSelected) AmberGold else TextPrimary,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis
             )
             Surface(
               color = if (profile.isVerified) AmberContainer else CyanContainer,
@@ -752,14 +798,18 @@ private fun LaneCatalogCard(
                 text = "${profile.bpmMin}-${profile.bpmMax} BPM",
                 style = MonospaceMetric.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
                 color = if (profile.isVerified) AmberGold else StudioCyan,
+                maxLines = 1,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
               )
             }
           }
+          Spacer(modifier = Modifier.height(2.dp))
           Text(
             text = "${profile.genreFamily} · ${profile.regionTag}${if (fw != null) " · ${fw.name}" else ""}",
             style = MaterialTheme.typography.labelSmall,
-            color = TextMuted
+            color = TextMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
         }
 

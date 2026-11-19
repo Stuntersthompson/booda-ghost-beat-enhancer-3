@@ -16,11 +16,16 @@ data class BeatMeterSnapshot(
   val audioDriven: Boolean,
   val effectiveBpm: Double,
   val bandTargets: List<Float>,
-  val bandLabels: List<String> = DEFAULT_BAND_LABELS
+  val bandLabels: List<String> = DEFAULT_BAND_LABELS,
+  val isMeasuredAudioSpectrum: Boolean = false
 ) {
   val summaryText: String
     get() {
-      val source = if (audioDriven) "driven by analyzed audio and beat parameters" else "simulated from beat parameters at ${effectiveBpm.roundToInt()} BPM"
+      val source = when {
+        isMeasuredAudioSpectrum -> "driven by analyzed audio FFT spectrum and beat parameters"
+        audioDriven -> "driven by analyzed audio and beat parameters"
+        else -> "parameter estimate at ${effectiveBpm.roundToInt()} BPM (no audio measured)"
+      }
       return "Intensity $intensityScore percent, Complexity $complexityScore percent, $tierLabel profile, $source"
     }
 
@@ -77,7 +82,8 @@ object BeatIntensityCalculator {
 
     // Lane baseline energy (0..1)
     val laneProfile = resolveLaneSpectralBias(activeLane)
-    val effectiveBpm = audioAnalysis?.bpm ?: laneProfile.defaultBpm
+    val validAudio = audioAnalysis?.takeIf { it.isAudioMeasured }
+    val effectiveBpm = validAudio?.bpm ?: laneProfile.defaultBpm
 
     // Intensity: style drive + sub/audio push + lane energy + optional audio analysis dynamics
     val paramIntensity = (
@@ -88,10 +94,10 @@ object BeatIntensityCalculator {
         laneProfile.energyBias * 0.12f
       ).coerceIn(0f, 1f)
 
-    val audioDriven = audioAnalysis != null
-    val audioEnergy = if (audioAnalysis != null) {
-      val rmsNorm = ((audioAnalysis.rmsDb + 48.0) / 44.0).toFloat().coerceIn(0.08f, 1f)
-      val onsetNorm = (audioAnalysis.onsetRate / 6.0).toFloat().coerceIn(0.05f, 1f)
+    val audioDriven = validAudio != null
+    val audioEnergy = if (validAudio != null) {
+      val rmsNorm = ((validAudio.rmsDb + 48.0) / 44.0).toFloat().coerceIn(0.08f, 1f)
+      val onsetNorm = (validAudio.onsetRate / 6.0).toFloat().coerceIn(0.05f, 1f)
       (rmsNorm * 0.65f + onsetNorm * 0.35f).coerceIn(0.08f, 1f)
     } else {
       0f
@@ -114,48 +120,59 @@ object BeatIntensityCalculator {
       else -> "MINIMAL"
     }
 
-    // Build 12 spectral band targets (32Hz -> 16kHz)
-    val lowBoost = if (audioAnalysis != null) {
-      (audioAnalysis.lowShare.toFloat().coerceIn(0.08f, 0.85f) * 1.15f + normAudioInf * 0.35f) / 1.35f
-    } else {
-      (laneProfile.subWeight * 0.55f + normAudioInf * 0.45f)
-    }.coerceIn(0.08f, 1f)
+    val measuredBands = validAudio?.measuredSpectrumBands?.takeIf { it.size == BAND_COUNT }
+    val isMeasuredSpectrum = measuredBands != null && validAudio.isSpectralMeasured
 
-    val centroidTilt = if (audioAnalysis != null) {
-      ((audioAnalysis.centroidHz.toFloat() - 600f) / 4200f).coerceIn(0.1f, 1f)
-    } else {
-      (laneProfile.airWeight * 0.5f + normStyleInf * 0.3f + normWeirdness * 0.2f).coerceIn(0.1f, 1f)
-    }
-
-    val onsetBoost = if (audioAnalysis != null) {
-      (audioAnalysis.onsetRate.toFloat() / 6.5f).coerceIn(0.1f, 1f)
-    } else {
-      (normVariety * 0.5f + styleComplexity * 0.5f).coerceIn(0.1f, 1f)
-    }
-
-    val targets = FloatArray(BAND_COUNT) { idx ->
-      val bandNorm = idx.toFloat() / (BAND_COUNT - 1)
-      val baseCurve = when {
-        idx <= 2 -> {
-          // Sub & Bass (32, 63, 125 Hz)
-          val falloff = 1f - idx * 0.06f
-          (lowBoost * 0.72f + rawIntensity * 0.28f) * falloff
-        }
-        idx <= 6 -> {
-          // Low-Mid & Mid (250, 500, 1k, 2k Hz)
-          val midFocus = 0.5f * styleComplexity + 0.3f * normStyleInf + 0.2f * lyricsComplexity
-          val centerShape = 1f - abs(bandNorm - 0.38f) * 0.45f
-          (midFocus * 0.68f + rawIntensity * 0.32f) * centerShape
-        }
-        else -> {
-          // Presence & Air (4k, 6k, 8k, 12k, 16k Hz)
-          val airEnergy = centroidTilt * 0.45f + onsetBoost * 0.30f + normWeirdness * 0.25f
-          val taper = 1f - ((idx - 7) * 0.08f)
-          (airEnergy * 0.75f + rawComplexity * 0.25f) * taper
-        }
+    // Build 12 spectral band targets (32Hz -> 16kHz) using real measured FFT bands when available
+    val targets = if (measuredBands != null) {
+      FloatArray(BAND_COUNT) { idx ->
+        val rawFftBand = measuredBands[idx].coerceIn(0.05f, 1f)
+        val blended = rawFftBand * 0.80f + rawIntensity * 0.20f
+        blended.coerceIn(0.06f, 0.98f)
       }
-      val minFloor = if (stylePrompt.isBlank() && lyricsMap.isBlank() && audioAnalysis == null) 0.06f else 0.10f
-      max(minFloor, baseCurve.coerceIn(0.06f, 0.98f))
+    } else {
+      val lowBoost = if (validAudio != null && validAudio.isSpectralMeasured) {
+        (validAudio.lowShare.toFloat().coerceIn(0.08f, 0.85f) * 1.15f + normAudioInf * 0.35f) / 1.35f
+      } else {
+        (laneProfile.subWeight * 0.55f + normAudioInf * 0.45f)
+      }.coerceIn(0.08f, 1f)
+
+      val centroidTilt = if (validAudio != null && validAudio.isSpectralMeasured) {
+        ((validAudio.centroidHz.toFloat() - 600f) / 4200f).coerceIn(0.1f, 1f)
+      } else {
+        (laneProfile.airWeight * 0.5f + normStyleInf * 0.3f + normWeirdness * 0.2f).coerceIn(0.1f, 1f)
+      }
+
+      val onsetBoost = if (validAudio != null) {
+        (validAudio.onsetRate.toFloat() / 6.5f).coerceIn(0.1f, 1f)
+      } else {
+        (normVariety * 0.5f + styleComplexity * 0.5f).coerceIn(0.1f, 1f)
+      }
+
+      FloatArray(BAND_COUNT) { idx ->
+        val bandNorm = idx.toFloat() / (BAND_COUNT - 1)
+        val baseCurve = when {
+          idx <= 2 -> {
+            // Sub & Bass (32, 63, 125 Hz)
+            val falloff = 1f - idx * 0.06f
+            (lowBoost * 0.72f + rawIntensity * 0.28f) * falloff
+          }
+          idx <= 6 -> {
+            // Low-Mid & Mid (250, 500, 1k, 2k Hz)
+            val midFocus = 0.5f * styleComplexity + 0.3f * normStyleInf + 0.2f * lyricsComplexity
+            val centerShape = 1f - abs(bandNorm - 0.38f) * 0.45f
+            (midFocus * 0.68f + rawIntensity * 0.32f) * centerShape
+          }
+          else -> {
+            // Presence & Air (4k, 6k, 8k, 12k, 16k Hz)
+            val airEnergy = centroidTilt * 0.45f + onsetBoost * 0.30f + normWeirdness * 0.25f
+            val taper = 1f - ((idx - 7) * 0.08f)
+            (airEnergy * 0.75f + rawComplexity * 0.25f) * taper
+          }
+        }
+        val minFloor = if (stylePrompt.isBlank() && lyricsMap.isBlank() && validAudio == null) 0.06f else 0.10f
+        max(minFloor, baseCurve.coerceIn(0.06f, 0.98f))
+      }
     }
 
     return BeatMeterSnapshot(
@@ -164,7 +181,8 @@ object BeatIntensityCalculator {
       tierLabel = tierLabel,
       audioDriven = audioDriven,
       effectiveBpm = effectiveBpm,
-      bandTargets = targets.toList()
+      bandTargets = targets.toList(),
+      isMeasuredAudioSpectrum = isMeasuredSpectrum
     )
   }
 

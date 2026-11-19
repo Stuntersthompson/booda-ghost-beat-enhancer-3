@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -43,8 +44,10 @@ import com.example.ui.components.SaveTemplateDialog
 import com.example.ui.components.SettingsCardView
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
+import com.example.viewmodel.RandomizeScope
 import com.example.viewmodel.StudioTab
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BuildScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
@@ -75,6 +78,7 @@ fun BuildScreen(viewModel: MainViewModel) {
   val handoffStepsDone by viewModel.handoffStepsDone.collectAsStateWithLifecycle()
   val recentHistory by viewModel.recentPromptHistory.collectAsStateWithLifecycle()
   val promptTemplates by viewModel.promptTemplates.collectAsStateWithLifecycle()
+  val appliedTemplateId by viewModel.appliedTemplateId.collectAsStateWithLifecycle()
   val beatMeterSnapshot by viewModel.beatMeterSnapshot.collectAsStateWithLifecycle()
   val micTranscriptionState by viewModel.micTranscriptionState.collectAsStateWithLifecycle()
   val micPermissionDenied by viewModel.micPermissionDenied.collectAsStateWithLifecycle()
@@ -84,6 +88,9 @@ fun BuildScreen(viewModel: MainViewModel) {
   var takeNameInput by rememberSaveable { mutableStateOf("") }
   var beatTitleInput by rememberSaveable { mutableStateOf("") }
   var showExcludeDropdown by remember { mutableStateOf(false) }
+  var showSlotPickerMenu by remember { mutableStateOf(false) }
+  var showRandomizeScopeMenu by remember { mutableStateOf(false) }
+  var selectedRandomizeScope by rememberSaveable { mutableStateOf(RandomizeScope.FULL) }
   var pendingTranscriptionTarget by rememberSaveable { mutableStateOf(TranscriptionTarget.BUILD_LYRICS) }
   var pendingExportIncludeSnapshot by rememberSaveable { mutableStateOf(true) }
   var pendingImportMode by rememberSaveable { mutableStateOf(HistoryImportMode.MERGE) }
@@ -141,10 +148,10 @@ fun BuildScreen(viewModel: MainViewModel) {
         .testTag("build_groove_monitor")
     ) {
       Column(modifier = Modifier.padding(12.dp)) {
-        Row(
+        FlowRow(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
+          verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
           Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
@@ -157,7 +164,9 @@ fun BuildScreen(viewModel: MainViewModel) {
             Text(
               text = "GROOVE PREVIEW MONITOR",
               style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-              color = StudioCyan
+              color = StudioCyan,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
             )
           }
 
@@ -169,7 +178,9 @@ fun BuildScreen(viewModel: MainViewModel) {
               Text(
                 text = PlaybackMath.formatDurationMmSs(playbackPositionMs),
                 style = MonospaceMetric.copy(fontSize = 10.sp),
-                color = StudioCyan
+                color = StudioCyan,
+                maxLines = 1,
+                softWrap = false
               )
               FilledIconButton(
                 onClick = { viewModel.togglePlayPauseAudio() },
@@ -187,24 +198,72 @@ fun BuildScreen(viewModel: MainViewModel) {
                   modifier = Modifier.size(18.dp)
                 )
               }
+              IconButton(
+                onClick = { viewModel.toggleAudioLoop() },
+                modifier = Modifier
+                  .size(48.dp)
+                  .testTag("build_monitor_loop")
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Repeat,
+                  contentDescription = if (isLoopingAudio) "Disable groove loop" else "Enable groove loop",
+                  tint = if (isLoopingAudio) AmberGold else TextMuted,
+                  modifier = Modifier.size(18.dp)
+                )
+              }
             }
 
+            val isMeasuredMonitor = audioAnalysis != null && audioAnalysis.isAudioMeasured
+            val monitorBadgeText = when {
+              audioAnalysis != null && audioAnalysis.isAudioMeasured -> {
+                val bpmPart = audioAnalysis.bpm?.let {
+                  val estSuffix = if (audioAnalysis.isTempoEstimate) " (Est.)" else ""
+                  "%.1f BPM%s".format(it, estSuffix)
+                } ?: "Unread BPM"
+                val keyPart = audioAnalysis.keyName ?: "Unread Key"
+                "$bpmPart • $keyPart"
+              }
+              audioAnalysis != null -> "AUDIO UNREAD · ESTIMATE"
+              isRecording -> "LIVE MIC"
+              else -> "PARAM EST. · NO AUDIO"
+            }
+            val monitorBadgeBg = when {
+              isMeasuredMonitor -> AmberGold.copy(alpha = 0.15f)
+              audioAnalysis != null -> StudioMiss.copy(alpha = 0.14f)
+              else -> StudioCardElevated
+            }
+            val monitorBadgeColor = when {
+              isMeasuredMonitor -> AmberGold
+              audioAnalysis != null -> StudioMiss
+              else -> TextSecondary
+            }
             Surface(
-              color = if (audioAnalysis != null) AmberGold.copy(alpha = 0.15f) else StudioCardElevated,
+              color = monitorBadgeBg,
               shape = RoundedCornerShape(4.dp)
             ) {
               Text(
-                text = if (audioAnalysis != null) {
-                  "%.1f BPM • %s".format(audioAnalysis.bpm ?: 130.0, audioAnalysis.keyName ?: "Key")
-                } else if (isRecording) {
-                  "LIVE MIC"
-                } else {
-                  "GROOVE CONTOUR"
-                },
+                text = monitorBadgeText,
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                color = if (audioAnalysis != null) AmberGold else TextSecondary,
+                color = monitorBadgeColor,
+                maxLines = 1,
+                softWrap = false,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
               )
+            }
+            if (audioAnalysis?.isAudioMeasured == true && audioAnalysis.peakDb > -1.0) {
+              Surface(
+                color = Color(0x28EF4444),
+                shape = RoundedCornerShape(4.dp)
+              ) {
+                Text(
+                  text = "Peak Clipping (> -1 dBFS)",
+                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                  color = StudioMiss,
+                  maxLines = 1,
+                  softWrap = false,
+                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+              }
             }
           }
         }
@@ -272,6 +331,7 @@ fun BuildScreen(viewModel: MainViewModel) {
   val quickTemplatesSection: @Composable () -> Unit = {
     QuickTemplatesBar(
       templates = promptTemplates,
+      appliedTemplateId = appliedTemplateId,
       onApplyTemplate = { template ->
         viewModel.applyPromptTemplate(template, context = context, switchToBuild = false)
       },
@@ -283,34 +343,142 @@ fun BuildScreen(viewModel: MainViewModel) {
   val quickActionsRow: @Composable () -> Unit = {
     Row(
       modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(8.dp)
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically
     ) {
-      Button(
-        onClick = { viewModel.injectSlotTemplate() },
-        colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier
-          .weight(1f)
-          .defaultMinSize(minHeight = 48.dp)
-          .testTag("action_inject_slot")
+      Row(
+        modifier = Modifier.weight(1f),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
       ) {
-        Icon(Icons.Default.Bolt, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text("Slot Inject", style = MaterialTheme.typography.labelMedium, color = TextPrimary)
+        Button(
+          onClick = { viewModel.injectSlotTemplate(context = context) },
+          colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+          modifier = Modifier
+            .weight(1f)
+            .defaultMinSize(minHeight = 48.dp)
+            .testTag("action_inject_slot")
+        ) {
+          Icon(Icons.Default.Bolt, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Slot Inject", style = MaterialTheme.typography.labelMedium, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Box {
+          FilledTonalIconButton(
+            onClick = { showSlotPickerMenu = true },
+            colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = StudioCardElevated),
+            modifier = Modifier
+              .size(48.dp)
+              .testTag("action_slot_picker")
+          ) {
+            Icon(
+              imageVector = Icons.Default.ArrowDropDown,
+              contentDescription = "Choose specific slot template",
+              tint = AmberGold
+            )
+          }
+          DropdownMenu(
+            expanded = showSlotPickerMenu,
+            onDismissRequest = { showSlotPickerMenu = false }
+          ) {
+            viewModel.bankRepo.slotTemplates.forEachIndexed { idx, slot ->
+              DropdownMenuItem(
+                text = {
+                  Column {
+                    Text(
+                      text = "Slot #${slot.id} · ${slot.applicability}",
+                      style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                      color = AmberGold
+                    )
+                    Text(
+                      text = slot.slots.joinToString(", ").ifBlank { slot.text },
+                      style = MaterialTheme.typography.labelSmall,
+                      color = TextSecondary,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis
+                    )
+                  }
+                },
+                onClick = {
+                  viewModel.injectSlotTemplate(templateIndex = idx, context = context)
+                  showSlotPickerMenu = false
+                }
+              )
+            }
+          }
+        }
       }
 
-      Button(
-        onClick = { viewModel.randomizeAll() },
-        colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier
-          .weight(1f)
-          .defaultMinSize(minHeight = 48.dp)
-          .testTag("action_randomize_all")
+      Row(
+        modifier = Modifier.weight(1f),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
       ) {
-        Icon(Icons.Default.Shuffle, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text("Randomize", style = MaterialTheme.typography.labelMedium, color = TextPrimary)
+        Button(
+          onClick = { viewModel.randomizeAll(scope = selectedRandomizeScope, context = context) },
+          colors = ButtonDefaults.buttonColors(containerColor = StudioCardElevated),
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+          modifier = Modifier
+            .weight(1f)
+            .defaultMinSize(minHeight = 48.dp)
+            .testTag("action_randomize_all")
+        ) {
+          Icon(Icons.Default.Shuffle, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text(
+            text = if (selectedRandomizeScope == RandomizeScope.FULL) "Randomize" else selectedRandomizeScope.label,
+            style = MaterialTheme.typography.labelMedium,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+        Box {
+          FilledTonalIconButton(
+            onClick = { showRandomizeScopeMenu = true },
+            colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = StudioCardElevated),
+            modifier = Modifier
+              .size(48.dp)
+              .testTag("action_randomize_scope")
+          ) {
+            Icon(
+              imageVector = Icons.Default.Tune,
+              contentDescription = "Choose Randomize scope",
+              tint = StudioCyan,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+          DropdownMenu(
+            expanded = showRandomizeScopeMenu,
+            onDismissRequest = { showRandomizeScopeMenu = false }
+          ) {
+            RandomizeScope.entries.forEach { scope ->
+              DropdownMenuItem(
+                text = {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                      text = scope.label,
+                      fontWeight = if (scope == selectedRandomizeScope) FontWeight.Bold else FontWeight.Normal,
+                      color = if (scope == selectedRandomizeScope) StudioCyan else TextPrimary
+                    )
+                    if (scope == selectedRandomizeScope) {
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Icon(Icons.Default.Check, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(14.dp))
+                    }
+                  }
+                },
+                onClick = {
+                  selectedRandomizeScope = scope
+                  showRandomizeScopeMenu = false
+                  viewModel.randomizeAll(scope = scope, context = context)
+                }
+              )
+            }
+          }
+        }
       }
     }
   }
@@ -375,8 +543,21 @@ fun BuildScreen(viewModel: MainViewModel) {
             dictatePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
           }
         },
-        onApplyToLyrics = { text -> viewModel.applyTranscriptToLyrics(text, context) },
-        onApplyToStyle = { text -> viewModel.applyTranscriptToStyle(text, context) },
+        onApplyToLyrics = { text, sectionTag, replaceExisting ->
+          viewModel.applyTranscriptToLyrics(
+            transcript = text,
+            sectionTag = sectionTag,
+            replaceExisting = replaceExisting,
+            context = context
+          )
+        },
+        onApplyToStyle = { text, replaceExisting ->
+          viewModel.applyTranscriptToStyle(
+            transcript = text,
+            replaceExisting = replaceExisting,
+            context = context
+          )
+        },
         onRetry = { viewModel.retryLastTranscription() },
         onDismiss = { viewModel.dismissTranscriptionState() }
       )
@@ -501,7 +682,12 @@ fun BuildScreen(viewModel: MainViewModel) {
     }
   }
 
+  val detectedArtists = remember(stylePrompt) {
+    SunoComplianceAuditor.findArtistNamesInStyle(stylePrompt)
+  }
+
   val preFlightAuditCard: @Composable () -> Unit = {
+    val fullyReady = allClear && detectedArtists.isEmpty()
     Surface(
       color = StudioCard,
       shape = RoundedCornerShape(12.dp),
@@ -513,15 +699,26 @@ fun BuildScreen(viewModel: MainViewModel) {
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Text("PRE-FLIGHT READINESS AUDIT", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
+          Text(
+            text = "PRE-FLIGHT READINESS AUDIT",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+              .weight(1f)
+              .padding(end = 8.dp)
+          )
           Surface(
-            color = if (allClear) Color(0x3310B981) else Color(0x33EF4444),
+            color = if (fullyReady) Color(0x3310B981) else Color(0x33EF4444),
             shape = RoundedCornerShape(6.dp)
           ) {
             Text(
-              text = if (allClear) "READY FOR SUNO" else "NEEDS ATTENTION",
+              text = if (fullyReady) "READY FOR SUNO" else "NEEDS ATTENTION",
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-              color = if (allClear) StudioWinner else StudioMiss,
+              color = if (fullyReady) StudioWinner else StudioMiss,
+              maxLines = 1,
+              softWrap = false,
               modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
             )
           }
@@ -547,12 +744,39 @@ fun BuildScreen(viewModel: MainViewModel) {
           note = "Style: ${stylePrompt.length}/1000 · Lyrics: ${lyricsMap.length}/5000 · Exclude: ${excludeText.length}/1000"
         )
 
+        ChecklistItem(
+          title = "No Artist Names in Style",
+          isOk = detectedArtists.isEmpty(),
+          note = if (detectedArtists.isEmpty()) {
+            "Verified (zero blocked artist names)"
+          } else {
+            "Found: ${detectedArtists.joinToString(", ")} — strip before Suno submit"
+          }
+        )
+
         if (variety > 0) {
           ChecklistItem(
             title = "Variety Slider Advisory",
             isOk = false,
             note = "Variety is $variety (>0 triggers Suno's prompt rewriter; set to 0 for verbatim prompt adherence)"
           )
+        }
+
+        if (!fullyReady) {
+          Spacer(modifier = Modifier.height(10.dp))
+          Button(
+            onClick = { viewModel.autoFixAllCompliance(context) },
+            colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+              .testTag("action_build_autofix_all")
+          ) {
+            Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Auto-Fix All Issues", color = Color.Black, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+          }
         }
       }
     }
@@ -592,7 +816,7 @@ fun BuildScreen(viewModel: MainViewModel) {
               onStyleInfluenceChange = { viewModel.setStyleInfluence(it) },
               audioInfluence = audioInfluence,
               onAudioInfluenceChange = { viewModel.setAudioInfluence(it) },
-              onResetToDefaults = { viewModel.resetToPreserveDefaults() }
+              onResetToDefaults = { viewModel.resetSlidersForCurrentJob(context) }
             )
           }
           item { handoffCard() }
@@ -632,6 +856,7 @@ fun BuildScreen(viewModel: MainViewModel) {
               onImportBackupJson = { json, mode, restore ->
                 viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore, mode = mode)
               },
+              onSaveAsTemplate = { entry -> viewModel.saveHistoryEntryAsTemplate(entry, context) },
               validateSchema = viewModel::validateHistoryBackupSchema
             )
           }
@@ -740,6 +965,7 @@ fun BuildScreen(viewModel: MainViewModel) {
             onImportBackupJson = { json, mode, restore ->
               viewModel.importPromptHistoryFromJson(context, json, restoreSnapshot = restore, mode = mode)
             },
+            onSaveAsTemplate = { entry -> viewModel.saveHistoryEntryAsTemplate(entry, context) },
             validateSchema = viewModel::validateHistoryBackupSchema
           )
         }
@@ -817,7 +1043,7 @@ fun BuildScreen(viewModel: MainViewModel) {
             onStyleInfluenceChange = { viewModel.setStyleInfluence(it) },
             audioInfluence = audioInfluence,
             onAudioInfluenceChange = { viewModel.setAudioInfluence(it) },
-            onResetToDefaults = { viewModel.resetToPreserveDefaults() }
+            onResetToDefaults = { viewModel.resetSlidersForCurrentJob(context) }
           )
         }
         item { handoffCard() }
@@ -970,17 +1196,20 @@ private fun ChecklistItem(title: String, isOk: Boolean, note: String) {
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BuildVoiceTranscriptionCard(
   state: TranscriptionUiState,
   onToggleDictate: (TranscriptionTarget) -> Unit,
-  onApplyToLyrics: (String) -> Unit,
-  onApplyToStyle: (String) -> Unit,
+  onApplyToLyrics: (text: String, sectionTag: String, replaceExisting: Boolean) -> Unit,
+  onApplyToStyle: (text: String, replaceExisting: Boolean) -> Unit,
   onRetry: () -> Unit,
   onDismiss: () -> Unit
 ) {
   val isRecording = state is TranscriptionUiState.Recording
   val isTranscribing = state is TranscriptionUiState.Transcribing
+  var selectedSectionTag by rememberSaveable { mutableStateOf("Hook (Dictated)") }
+  var replaceExistingMode by rememberSaveable { mutableStateOf(false) }
 
   Surface(
     color = StudioCard,
@@ -991,10 +1220,10 @@ private fun BuildVoiceTranscriptionCard(
       .testTag("build_mic_transcribe_card")
   ) {
     Column(modifier = Modifier.padding(12.dp)) {
-      Row(
+      FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(4.dp)
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Icon(
@@ -1018,6 +1247,8 @@ private fun BuildVoiceTranscriptionCard(
             text = "GEMINI-3.5-TRANSCRIBE",
             style = MonospaceMetric.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
             color = StudioCyan,
+            maxLines = 1,
+            softWrap = false,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
           )
         }
@@ -1055,9 +1286,11 @@ private fun BuildVoiceTranscriptionCard(
           )
           Spacer(modifier = Modifier.width(6.dp))
           Text(
-            text = if (recordingLyrics) "Stop (${state.dbLevel.toInt()}dB)" else "Dictate Lyrics",
+            text = if (recordingLyrics) "Stop (${(state as TranscriptionUiState.Recording).dbLevel.toInt()}dB)" else "Dictate Lyrics",
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-            color = if (recordingLyrics) Color.White else TextPrimary
+            color = if (recordingLyrics) Color.White else TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
         }
 
@@ -1084,9 +1317,11 @@ private fun BuildVoiceTranscriptionCard(
           )
           Spacer(modifier = Modifier.width(6.dp))
           Text(
-            text = if (recordingStyle) "Stop (${state.dbLevel.toInt()}dB)" else "Dictate Style",
+            text = if (recordingStyle) "Stop (${(state as TranscriptionUiState.Recording).dbLevel.toInt()}dB)" else "Dictate Style",
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-            color = if (recordingStyle) Color.White else TextPrimary
+            color = if (recordingStyle) Color.White else TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
         }
       }
@@ -1158,12 +1393,43 @@ private fun BuildVoiceTranscriptionCard(
                 color = TextPrimary
               )
               Spacer(modifier = Modifier.height(8.dp))
+              Text(
+                text = "TARGET SECTION & MODE",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                color = TextMuted
+              )
+              Spacer(modifier = Modifier.height(4.dp))
+              FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                listOf("Hook (Dictated)", "Verse 1", "Chorus", "Bridge", "Ad-Libs").forEach { tag ->
+                  FilterChip(
+                    selected = selectedSectionTag == tag,
+                    onClick = { selectedSectionTag = tag },
+                    label = { Text(tag, style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier.defaultMinSize(minHeight = 40.dp)
+                  )
+                }
+                FilterChip(
+                  selected = replaceExistingMode,
+                  onClick = { replaceExistingMode = !replaceExistingMode },
+                  label = {
+                    Text(
+                      text = if (replaceExistingMode) "Mode: Replace" else "Mode: Append",
+                      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                  },
+                  modifier = Modifier.defaultMinSize(minHeight = 40.dp)
+                )
+              }
+              Spacer(modifier = Modifier.height(8.dp))
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
                 OutlinedButton(
-                  onClick = { onApplyToLyrics(state.text) },
+                  onClick = { onApplyToLyrics(state.text, selectedSectionTag, replaceExistingMode) },
                   shape = RoundedCornerShape(8.dp),
                   modifier = Modifier
                     .weight(1f)
@@ -1173,7 +1439,7 @@ private fun BuildVoiceTranscriptionCard(
                   Text("Insert to Lyrics", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = AmberGold)
                 }
                 OutlinedButton(
-                  onClick = { onApplyToStyle(state.text) },
+                  onClick = { onApplyToStyle(state.text, replaceExistingMode) },
                   shape = RoundedCornerShape(8.dp),
                   modifier = Modifier
                     .weight(1f)

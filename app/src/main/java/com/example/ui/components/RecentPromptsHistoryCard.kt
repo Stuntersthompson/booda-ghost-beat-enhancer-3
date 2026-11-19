@@ -14,6 +14,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.ImportExport
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -66,6 +68,7 @@ fun RecentPromptsHistoryCard(
   onCopyBackupJson: ((includeSnapshot: Boolean) -> Unit)? = null,
   onImportBackupFile: ((mode: HistoryImportMode, restoreSnapshot: Boolean) -> Unit)? = null,
   onImportBackupJson: ((jsonStr: String, mode: HistoryImportMode, restoreSnapshot: Boolean) -> Unit)? = null,
+  onSaveAsTemplate: ((PromptHistoryEntity) -> Unit)? = null,
   validateSchema: (String) -> HistorySchemaValidationResult = PromptHistoryRepository::validateSchema
 ) {
   val context = LocalContext.current
@@ -77,6 +80,26 @@ fun RecentPromptsHistoryCard(
   var restoreSnapshotToggle by rememberSaveable { mutableStateOf(true) }
   var showPasteSection by rememberSaveable { mutableStateOf(false) }
   var pasteJsonInput by rememberSaveable { mutableStateOf("") }
+  var historyQuery by rememberSaveable { mutableStateOf("") }
+  var sourceFilter by rememberSaveable { mutableStateOf("All") }
+
+  val filteredHistory = remember(history, historyQuery, sourceFilter) {
+    val q = historyQuery.trim().lowercase()
+    history.filter { entry ->
+      val matchesSource = when (sourceFilter) {
+        "All" -> true
+        "Send" -> entry.source.contains("Send", ignoreCase = true) ||
+          entry.source.contains("Simple", ignoreCase = true) ||
+          entry.source.contains("Preset", ignoreCase = true)
+        else -> entry.source.contains(sourceFilter, ignoreCase = true)
+      }
+      val matchesQuery = q.isEmpty() ||
+        entry.prompt.lowercase().contains(q) ||
+        entry.lane.lowercase().contains(q) ||
+        entry.source.lowercase().contains(q)
+      matchesSource && matchesQuery
+    }
+  }
 
   val hasBackupActions = onExportBackupFile != null ||
     onCopyBackupJson != null ||
@@ -130,7 +153,9 @@ fun RecentPromptsHistoryCard(
           Text(
             text = "RECENT ${PromptHistoryRepository.MAX_HISTORY_COUNT} VARIATIONS",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = AmberGold
+            color = AmberGold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
         }
 
@@ -228,22 +253,116 @@ fun RecentPromptsHistoryCard(
               )
             }
           } else {
-            LazyRow(
-              horizontalArrangement = Arrangement.spacedBy(10.dp),
+            OutlinedTextField(
+              value = historyQuery,
+              onValueChange = { historyQuery = it },
+              placeholder = { Text("Filter history by lane, keyword, source...", style = MaterialTheme.typography.bodySmall) },
+              leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+              },
+              trailingIcon = {
+                if (historyQuery.isNotEmpty()) {
+                  IconButton(
+                    onClick = { historyQuery = "" },
+                    modifier = Modifier.minimumInteractiveComponentSize()
+                  ) {
+                    Icon(Icons.Default.Close, contentDescription = "Clear history search", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                  }
+                }
+              },
+              singleLine = true,
+              textStyle = MaterialTheme.typography.bodySmall.copy(color = TextPrimary),
+              shape = RoundedCornerShape(8.dp),
+              colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = StudioBg,
+                unfocusedContainerColor = StudioBg,
+                focusedBorderColor = StudioCyan,
+                unfocusedBorderColor = StudioBorder
+              ),
               modifier = Modifier
                 .fillMaxWidth()
-                .testTag("recent_prompts_row")
+                .testTag("input_recent_history_search")
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            val sources = listOf("All", "Analyze", "Builder", "Slot Inject", "Randomize", "Send")
+            LazyRow(
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              modifier = Modifier.fillMaxWidth()
             ) {
-              items(
-                items = history,
-                key = { it.id }
-              ) { entry ->
-                RecentHistoryVariationCard(
-                  entry = entry,
-                  onRecall = { onRecallVariation(entry) },
-                  onCopy = { onCopyPrompt(entry) },
-                  onDelete = { onDeleteEntry(entry.id) }
+              items(sources) { src ->
+                FilterChip(
+                  selected = sourceFilter == src,
+                  onClick = { sourceFilter = src },
+                  label = {
+                    Text(
+                      text = src,
+                      style = MaterialTheme.typography.labelSmall,
+                      maxLines = 1,
+                      softWrap = false
+                    )
+                  },
+                  modifier = Modifier.defaultMinSize(minHeight = 40.dp),
+                  colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = StudioCyan.copy(alpha = 0.2f),
+                    selectedLabelColor = StudioCyan,
+                    containerColor = StudioBg,
+                    labelColor = TextSecondary
+                  )
                 )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (filteredHistory.isEmpty()) {
+              Surface(
+                color = StudioBg,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Row(
+                  modifier = Modifier.padding(10.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text(
+                    text = "No matching variations for current filter.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted,
+                    modifier = Modifier.weight(1f)
+                  )
+                  TextButton(
+                    onClick = {
+                      historyQuery = ""
+                      sourceFilter = "All"
+                    },
+                    modifier = Modifier.minimumInteractiveComponentSize()
+                  ) {
+                    Text("Reset", color = StudioCyan)
+                  }
+                }
+              }
+            } else {
+              LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("recent_prompts_row")
+              ) {
+                items(
+                  items = filteredHistory,
+                  key = { it.id }
+                ) { entry ->
+                  RecentHistoryVariationCard(
+                    entry = entry,
+                    onRecall = { onRecallVariation(entry) },
+                    onCopy = { onCopyPrompt(entry) },
+                    onDelete = { onDeleteEntry(entry.id) },
+                    onSaveAsTemplate = onSaveAsTemplate?.let { handler -> { handler(entry) } }
+                  )
+                }
               }
             }
           }
@@ -688,12 +807,14 @@ fun RecentPromptsHistoryCard(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RecentHistoryVariationCard(
   entry: PromptHistoryEntity,
   onRecall: () -> Unit,
   onCopy: () -> Unit,
-  onDelete: () -> Unit
+  onDelete: () -> Unit,
+  onSaveAsTemplate: (() -> Unit)? = null
 ) {
   var isCopiedAnimation by remember { mutableStateOf(false) }
   LaunchedEffect(isCopiedAnimation) {
@@ -728,8 +849,8 @@ private fun RecentHistoryVariationCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
+        FlowRow(
+          verticalArrangement = Arrangement.spacedBy(4.dp),
           horizontalArrangement = Arrangement.spacedBy(4.dp),
           modifier = Modifier.weight(1f)
         ) {
@@ -742,6 +863,7 @@ private fun RecentHistoryVariationCard(
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
               color = sourceAccent,
               maxLines = 1,
+              softWrap = false,
               modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
             )
           }
@@ -750,12 +872,26 @@ private fun RecentHistoryVariationCard(
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 10.sp),
             color = TextPrimary,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false)
+            overflow = TextOverflow.Ellipsis
           )
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
+          if (onSaveAsTemplate != null) {
+            IconButton(
+              onClick = onSaveAsTemplate,
+              modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .testTag("action_save_history_template_${entry.id}")
+            ) {
+              Icon(
+                imageVector = Icons.Default.BookmarkAdd,
+                contentDescription = "Save variation as template",
+                tint = AmberGold,
+                modifier = Modifier.size(16.dp)
+              )
+            }
+          }
           IconButton(
             onClick = {
               isCopiedAnimation = true
@@ -813,13 +949,20 @@ private fun RecentHistoryVariationCard(
         Text(
           text = "Tap card to Load in Build",
           style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
-          color = AmberGold
+          color = AmberGold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier
+            .weight(1f)
+            .padding(end = 6.dp)
         )
-        val bpmText = entry.bpm?.let { " · ${it} BPM" } ?: ""
+        val bpmText = entry.bpm?.let { " · $it BPM" } ?: ""
         Text(
           text = "$modeLabel$bpmText · ${entry.chars}c",
           style = MonospaceMetric.copy(fontSize = 10.sp),
-          color = if (entry.chars <= STYLE_LIMIT) StudioCyan else StudioMiss
+          color = if (entry.chars <= STYLE_LIMIT) StudioCyan else StudioMiss,
+          maxLines = 1,
+          softWrap = false
         )
       }
     }

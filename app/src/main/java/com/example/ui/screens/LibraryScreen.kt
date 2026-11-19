@@ -15,7 +15,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,16 +30,19 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.StylePrompt
 import com.example.data.repository.PromptTemplateRepository
+import com.example.ui.components.BrandLogoImage
 import com.example.ui.components.PromptTemplateCard
 import com.example.ui.components.SaveTemplateDialog
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LibraryScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
@@ -64,11 +66,15 @@ fun LibraryScreen(viewModel: MainViewModel) {
   val verifiedLanes = viewModel.bankRepo.verifiedLanes
 
   val categoryOptions = remember(dynamicCategories) {
-    (listOf("All") + dynamicCategories + PromptTemplateRepository.DEFAULT_CATEGORIES).distinct()
+    (listOf("All", "Pinned") + dynamicCategories + PromptTemplateRepository.DEFAULT_CATEGORIES).distinct()
   }
 
   val filteredTemplates = remember(allTemplates, templateCategory, templateQuery) {
-    PromptTemplateRepository.filterTemplates(allTemplates, templateCategory, templateQuery)
+    if (templateCategory.equals("Pinned", ignoreCase = true)) {
+      PromptTemplateRepository.filterTemplates(allTemplates.filter { it.isPinned }, "All", templateQuery)
+    } else {
+      PromptTemplateRepository.filterTemplates(allTemplates, templateCategory, templateQuery)
+    }
   }
 
   val filteredPrompts = remember(query, filterTrack, filterLane, allStyles) {
@@ -123,7 +129,9 @@ fun LibraryScreen(viewModel: MainViewModel) {
           Text(
             text = "Templates (${allTemplates.size})",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = if (showTemplatesMode) Color.Black else TextPrimary
+            color = if (showTemplatesMode) Color.Black else TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
         }
       }
@@ -148,7 +156,9 @@ fun LibraryScreen(viewModel: MainViewModel) {
           Text(
             text = "Style Bank (${allStyles.size})",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = if (!showTemplatesMode) Color.Black else TextPrimary
+            color = if (!showTemplatesMode) Color.Black else TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
         }
       }
@@ -266,8 +276,13 @@ fun LibraryScreen(viewModel: MainViewModel) {
         modifier = Modifier.padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
       ) {
-        Icon(Icons.Default.SearchOff, contentDescription = null, tint = TextMuted, modifier = Modifier.size(36.dp))
-        Spacer(modifier = Modifier.height(8.dp))
+        BrandLogoImage(
+          height = 72.dp,
+          contentDescription = "BooDa Beat Enhancer official logo",
+          framed = true,
+          modifier = Modifier.testTag("library_templates_empty_logo")
+        )
+        Spacer(modifier = Modifier.height(12.dp))
         Text("No matching templates", style = MaterialTheme.typography.titleMedium, color = AmberGold)
         Spacer(modifier = Modifier.height(4.dp))
         Text("Reset search/category filters or restore the starter Suno templates.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
@@ -443,8 +458,13 @@ fun LibraryScreen(viewModel: MainViewModel) {
       modifier = Modifier.fillMaxWidth().border(1.dp, StudioBorder, RoundedCornerShape(12.dp))
     ) {
       Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Default.SearchOff, contentDescription = null, tint = TextMuted, modifier = Modifier.size(36.dp))
-        Spacer(modifier = Modifier.height(8.dp))
+        BrandLogoImage(
+          height = 72.dp,
+          contentDescription = "BooDa Beat Enhancer official logo",
+          framed = true,
+          modifier = Modifier.testTag("library_bank_empty_logo")
+        )
+        Spacer(modifier = Modifier.height(12.dp))
         Text("No matching style prompts", style = MaterialTheme.typography.titleMedium, color = AmberGold)
         Spacer(modifier = Modifier.height(4.dp))
         Text("Clear the search query or switch Track/Lane filters to inspect all 316 verified prompts.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
@@ -512,7 +532,8 @@ fun LibraryScreen(viewModel: MainViewModel) {
                   template = template,
                   onApply = { viewModel.applyPromptTemplate(template, context = context, switchToBuild = true) },
                   onTogglePin = { viewModel.toggleTemplatePinned(template) },
-                  onDelete = { viewModel.deletePromptTemplate(template) }
+                  onDelete = { viewModel.deletePromptTemplate(template) },
+                  onDuplicate = { viewModel.duplicatePromptTemplate(template, context) }
                 )
               }
             }
@@ -562,7 +583,8 @@ fun LibraryScreen(viewModel: MainViewModel) {
                 template = template,
                 onApply = { viewModel.applyPromptTemplate(template, context = context, switchToBuild = true) },
                 onTogglePin = { viewModel.toggleTemplatePinned(template) },
-                onDelete = { viewModel.deletePromptTemplate(template) }
+                onDelete = { viewModel.deletePromptTemplate(template) },
+                onDuplicate = { viewModel.duplicatePromptTemplate(template, context) }
               )
             }
           }
@@ -608,6 +630,7 @@ fun LibraryScreen(viewModel: MainViewModel) {
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PromptCardItem(
   prompt: StylePrompt,
@@ -628,7 +651,13 @@ private fun PromptCardItem(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+        FlowRow(
+          verticalArrangement = Arrangement.spacedBy(4.dp),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          modifier = Modifier
+            .weight(1f)
+            .padding(end = 4.dp)
+        ) {
           Surface(
             color = if (isPreserve) AmberContainer else CyanContainer,
             shape = RoundedCornerShape(4.dp)
@@ -637,14 +666,17 @@ private fun PromptCardItem(
               text = "Track ${prompt.track} · ${if (isPreserve) "Preserve" else if (prompt.track == 1) "Original" else "Universal"}",
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
               color = if (isPreserve) AmberGold else StudioCyan,
+              maxLines = 1,
+              softWrap = false,
               modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
             )
           }
-          Spacer(modifier = Modifier.width(6.dp))
           Text(
             text = prompt.subgenre,
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = TextPrimary
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
         }
 

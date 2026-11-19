@@ -45,7 +45,7 @@ fun SettingsCardView(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Column {
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
           Text(
             text = "SUNO V6 ENGINE CONTROLS",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
@@ -64,7 +64,7 @@ fun SettingsCardView(
         ) {
           Icon(
             imageVector = Icons.Default.Refresh,
-            contentDescription = "Reset Suno v6 Settings to defaults",
+            contentDescription = "Calibrate Suno v6 sliders for current mode",
             tint = TextSecondary,
             modifier = Modifier.size(18.dp)
           )
@@ -128,18 +128,27 @@ private fun SettingSlider(
       Text(
         text = label,
         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-        color = TextPrimary
+        color = TextPrimary,
+        modifier = Modifier.weight(1f).padding(end = 8.dp)
       )
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(text = tip, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = TextMuted)
-        Spacer(modifier = Modifier.width(6.dp))
+      Surface(
+        color = StudioCardElevated,
+        shape = RoundedCornerShape(4.dp)
+      ) {
         Text(
           text = "$value",
-          style = MonospaceMetric.copy(fontSize = 14.sp),
-          color = AmberGold
+          style = MonospaceMetric.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+          color = AmberGold,
+          modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
         )
       }
     }
+    Text(
+      text = tip,
+      style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+      color = TextMuted,
+      modifier = Modifier.padding(top = 1.dp)
+    )
     Slider(
       value = value.toFloat(),
       onValueChange = { onValueChange(it.toInt()) },

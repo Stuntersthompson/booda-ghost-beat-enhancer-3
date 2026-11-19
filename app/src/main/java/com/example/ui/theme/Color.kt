@@ -16,6 +16,7 @@ val CyanContainer = Color(0xFF003645)
 
 // Studio Console Dark Surfaces
 val StudioBg = Color(0xFF0A0C10)
+val StudioLogoCharcoal = Color(0xFF0A0A0C)
 val StudioSurface = Color(0xFF12151C)
 val StudioCard = Color(0xFF181C26)
 val StudioCardElevated = Color(0xFF202633)

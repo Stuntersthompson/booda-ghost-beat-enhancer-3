@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,12 +16,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -35,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -50,9 +55,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.JobType
 import com.example.data.model.PromptTemplateEntity
 import com.example.data.repository.PromptTemplateRepository
+import com.example.ui.theme.AmberContainer
 import com.example.ui.theme.AmberGold
+import com.example.ui.theme.CyanContainer
 import com.example.ui.theme.MonospaceMetric
 import com.example.ui.theme.StudioBg
 import com.example.ui.theme.StudioBorder
@@ -67,14 +75,21 @@ import com.example.ui.theme.TextSecondary
  * Horizontal Room-backed Quick Templates bar on the Build screen for one-tap recall
  * of pinned and frequently used Suno prompt templates (e.g., Lo-Fi Hip Hop, Dark Synthwave).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickTemplatesBar(
   templates: List<PromptTemplateEntity>,
   onApplyTemplate: (PromptTemplateEntity) -> Unit,
   onSaveCurrentClick: () -> Unit,
   onBrowseAllClick: () -> Unit,
-  modifier: Modifier = Modifier
+  modifier: Modifier = Modifier,
+  appliedTemplateId: Long? = null
 ) {
+  var pinnedOnly by rememberSaveable { mutableStateOf(false) }
+  val visibleTemplates = remember(templates, pinnedOnly) {
+    if (pinnedOnly) templates.filter { it.isPinned } else templates
+  }
+
   Surface(
     color = StudioCard,
     shape = RoundedCornerShape(12.dp),
@@ -84,12 +99,15 @@ fun QuickTemplatesBar(
       .testTag("build_quick_templates_bar")
   ) {
     Column(modifier = Modifier.padding(12.dp)) {
-      Row(
+      FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(4.dp)
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.align(Alignment.CenterVertically).padding(end = 6.dp)
+        ) {
           Icon(
             imageVector = Icons.Default.Bookmarks,
             contentDescription = null,
@@ -100,14 +118,39 @@ fun QuickTemplatesBar(
           Text(
             text = "QUICK TEMPLATES",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = AmberGold
+            color = AmberGold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
         }
 
-        Row(
+        FlowRow(
           horizontalArrangement = Arrangement.spacedBy(4.dp),
-          verticalAlignment = Alignment.CenterVertically
+          verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+          TextButton(
+            onClick = { pinnedOnly = !pinnedOnly },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier
+              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+              .semantics { contentDescription = if (pinnedOnly) "Show all quick templates" else "Show pinned quick templates only" }
+              .testTag("action_toggle_pinned_quick_templates")
+          ) {
+            Icon(
+              imageVector = Icons.Default.PushPin,
+              contentDescription = null,
+              tint = if (pinnedOnly) AmberGold else TextMuted,
+              modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              text = if (pinnedOnly) "Pinned" else "All",
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+              color = if (pinnedOnly) AmberGold else TextSecondary,
+              maxLines = 1
+            )
+          }
+
           TextButton(
             onClick = onBrowseAllClick,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
@@ -119,7 +162,8 @@ fun QuickTemplatesBar(
             Text(
               text = "All (${templates.size})",
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-              color = StudioCyan
+              color = StudioCyan,
+              maxLines = 1
             )
           }
 
@@ -138,7 +182,8 @@ fun QuickTemplatesBar(
             Text(
               text = "Save Preset",
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-              color = AmberGold
+              color = AmberGold,
+              maxLines = 1
             )
           }
         }
@@ -146,28 +191,43 @@ fun QuickTemplatesBar(
 
       Spacer(modifier = Modifier.height(6.dp))
 
-      if (templates.isEmpty()) {
+      if (visibleTemplates.isEmpty()) {
         Text(
-          text = "No saved templates yet. Tap Save Preset to store your current prompt & sliders.",
+          text = if (pinnedOnly) {
+            "No pinned templates yet. Tap All or pin favorites in Library."
+          } else {
+            "No saved templates yet. Tap Save Preset to store your current prompt & sliders."
+          },
           style = MaterialTheme.typography.bodySmall,
           color = TextMuted
         )
       } else {
         LazyRow(
+          contentPadding = PaddingValues(horizontal = 2.dp),
           horizontalArrangement = Arrangement.spacedBy(8.dp),
           modifier = Modifier.fillMaxWidth()
         ) {
-          items(templates.take(10), key = { it.id }) { template ->
+          items(visibleTemplates.take(12), key = { it.id }) { template ->
+            val isApplied = appliedTemplateId != null && appliedTemplateId == template.id
+            val isPreserve = JobType.fromString(template.jobType) == JobType.PRESERVE
             Surface(
-              color = StudioCardElevated,
+              color = when {
+                isApplied -> AmberContainer
+                else -> StudioCardElevated
+              },
               shape = RoundedCornerShape(10.dp),
               modifier = Modifier
+                .widthIn(min = 128.dp, max = 210.dp)
                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .border(
-                  0.5.dp,
-                  if (template.isPinned) AmberGold.copy(alpha = 0.55f) else StudioBorder,
-                  RoundedCornerShape(10.dp)
+                  width = if (isApplied) 1.5.dp else 0.75.dp,
+                  color = when {
+                    isApplied -> StudioCyan
+                    template.isPinned -> AmberGold.copy(alpha = 0.55f)
+                    else -> StudioBorder
+                  },
+                  shape = RoundedCornerShape(10.dp)
                 )
                 .clickable { onApplyTemplate(template) }
                 .semantics {
@@ -181,29 +241,46 @@ fun QuickTemplatesBar(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalArrangement = Arrangement.Center
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  if (template.isPinned) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  if (isApplied) {
+                    Icon(
+                      imageVector = Icons.Default.CheckCircle,
+                      contentDescription = null,
+                      tint = StudioCyan,
+                      modifier = Modifier.size(12.dp)
+                    )
+                  } else if (template.isPinned) {
                     Icon(
                       imageVector = Icons.Default.PushPin,
                       contentDescription = null,
                       tint = AmberGold,
                       modifier = Modifier.size(11.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
                   }
                   Text(
                     text = template.category,
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                    color = StudioCyan,
+                    color = if (isPreserve) AmberGold else StudioCyan,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                   )
-                  if (template.useCount > 0) {
-                    Spacer(modifier = Modifier.width(6.dp))
+                  if (template.bpmHint.isNotBlank()) {
+                    Text(
+                      text = "· ${template.bpmHint}",
+                      style = MonospaceMetric.copy(fontSize = 9.sp),
+                      color = TextSecondary,
+                      maxLines = 1
+                    )
+                  } else if (template.useCount > 0) {
                     Text(
                       text = "×${template.useCount}",
                       style = MonospaceMetric.copy(fontSize = 9.sp),
-                      color = TextMuted
+                      color = TextMuted,
+                      maxLines = 1
                     )
                   }
                 }

@@ -300,9 +300,9 @@ class GeminiBeatService {
     } else {
       "Create original instrumental"
     }
-    val bpmInt = analysis.bpm?.toInt() ?: 130
-    val keyLabel = analysis.keyName ?: "minor pocket"
-    val query = "Suno AI v6 ${analysis.suggestedLane} $bpmInt BPM $keyLabel $modeLabel audio influence variety best settings"
+    val bpmTag = analysis.bpm?.let { "${it.toInt()} BPM " } ?: ""
+    val keyLabel = analysis.keyName?.let { "$it " } ?: ""
+    val query = "Suno AI v6 ${analysis.suggestedLane} ${bpmTag}${keyLabel}$modeLabel audio influence variety best settings"
     return researchWithGoogleSearch(query)
   }
 
@@ -385,13 +385,13 @@ class GeminiBeatService {
 
       DSP TELEMETRY:
       - Clip Name: ${analysis.fileName}
-      - Duration: ${"%.1f".format(analysis.durationSec)}s
-      - Tempo: ${analysis.bpm?.let { "%.1f".format(it) } ?: "Unknown"} BPM (confidence: ${analysis.bpmConfidence} / ${(analysis.bpmConfidenceScore * 100).toInt()}%)
+      - Duration: ${if (analysis.durationSec > 0.0) "${"%.1f".format(analysis.durationSec)}s" else "Unread"}
+      - Tempo: ${analysis.bpm?.let { "${"%.1f".format(it)} BPM" } ?: "Unread"} (confidence: ${analysis.bpmConfidence} / ${(analysis.bpmConfidenceScore * 100).toInt()}%)
       - Musical Key & Mode: ${analysis.keyName ?: "Unread"} (clear: ${analysis.keyClear}, confidence: ${(analysis.keyConfidenceScore * 100).toInt()}%)
-      - RMS Loudness: ${"%.1f".format(analysis.rmsDb)} dBFS | Peak: ${"%.1f".format(analysis.peakDb)} dBFS
-      - Sub-Bass Share (<160 Hz): ${(analysis.lowShare * 100).toInt()}%
-      - Spectral Centroid: ${analysis.centroidHz.toInt()} Hz
-      - Onset Density: ${analysis.onsetRate} hits/sec
+      - RMS Loudness: ${if (analysis.isAudioMeasured && analysis.peakDb > -79.5) "${"%.1f".format(analysis.rmsDb)} dBFS" else "Unread"} | Peak: ${if (analysis.isAudioMeasured && analysis.peakDb > -79.5) "${"%.1f".format(analysis.peakDb)} dBFS" else "Unread"}
+      - Sub-Bass Share (<160 Hz): ${if (analysis.isSpectralMeasured) "${(analysis.lowShare * 100).toInt()}%" else "Unread"}
+      - Spectral Centroid: ${if (analysis.isSpectralMeasured) "${analysis.centroidHz.toInt()} Hz" else "Unread"}
+      - Onset Density: ${if (analysis.isAudioMeasured) "${analysis.onsetRate} hits/sec" else "Unread"}
       - Suggested Lane: ${analysis.suggestedLane}
 
       Provide 4 distinct Suno v6 prompt variations focusing on heavy tuned 808s, crisp trap/boom-bap pocket drums, and mix breathing room.
@@ -424,7 +424,8 @@ class GeminiBeatService {
         if (isPreserve) {
           "Lock uploaded sample on Extend route (Variety 0, Audio Influence 80) and layer pocketed 808 + hi-hats underneath."
         } else {
-          "Build around ${analysis.suggestedLane} pocket at ${analysis.bpm?.toInt() ?: 130} BPM with controlled low-end punch."
+          val bpmClause = analysis.bpm?.let { " at ${it.toInt()} BPM" } ?: ""
+          "Build around ${analysis.suggestedLane} pocket$bpmClause with controlled low-end punch."
         }
       }
 
@@ -476,7 +477,8 @@ class GeminiBeatService {
   }
 
   private fun sanitizePrompt200(raw: String): String {
-    val normalized = raw.replace(Regex("\\s+"), " ").trim()
+    val artistFree = com.example.data.model.SunoComplianceAuditor.stripArtistNames(raw)
+    val normalized = artistFree.replace(Regex("\\s+"), " ").trim()
     if (normalized.length <= 200) return normalized
     val cut = normalized.substring(0, 200)
     val lastSpace = cut.lastIndexOf(' ')

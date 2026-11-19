@@ -15,14 +15,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.LOCK_LINE
 import com.example.ui.theme.*
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PromptBox(
   title: String,
@@ -36,6 +37,8 @@ fun PromptBox(
 ) {
   val chars = text.length
   val isOverLimit = chars > limit
+  val isAtCap = chars == limit
+  val isNearCap = !isOverLimit && !isAtCap && chars >= (limit * 0.9).toInt()
   val hasLockLine = text.contains(LOCK_LINE)
   val isPreserveMissingLock = isPreserve && !hasLockLine && text.isNotBlank()
   var isCopiedFlash by remember { mutableStateOf(false) }
@@ -64,13 +67,20 @@ fun PromptBox(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(
+          modifier = Modifier
+            .weight(1f)
+            .padding(end = 6.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
           Text(
             text = title.uppercase(),
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = AmberGold
+            color = AmberGold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
-          Spacer(modifier = Modifier.width(8.dp))
           // Character count badge
           Surface(
             color = if (isOverLimit) Color(0x33EF4444) else StudioCardElevated,
@@ -79,9 +89,30 @@ fun PromptBox(
             Text(
               text = "$chars / $limit",
               style = MonospaceMetric.copy(fontSize = 11.sp),
-              color = if (isOverLimit) StudioMiss else if (chars > limit * 0.9) AmberGold else StudioCyan,
+              color = if (isOverLimit) StudioMiss else if (isAtCap || isNearCap) AmberGold else StudioCyan,
+              maxLines = 1,
+              softWrap = false,
               modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
             )
+          }
+          if (isOverLimit || isAtCap || isNearCap) {
+            Surface(
+              color = if (isOverLimit) Color(0x28EF4444) else Color(0x28F5A524),
+              shape = RoundedCornerShape(6.dp)
+            ) {
+              Text(
+                text = when {
+                  isOverLimit -> "Over cap"
+                  isAtCap -> "At cap"
+                  else -> "Near cap"
+                },
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
+                color = if (isOverLimit) StudioMiss else AmberGold,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              )
+            }
           }
         }
 
@@ -118,7 +149,7 @@ fun PromptBox(
           modifier = Modifier.fillMaxWidth()
         ) {
           Row(
-            modifier = Modifier.padding(6.dp),
+            modifier = Modifier.padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
           ) {
             Icon(
@@ -131,7 +162,8 @@ fun PromptBox(
             Text(
               text = "Preserve jobs must include the exact lock line!",
               style = MaterialTheme.typography.labelSmall,
-              color = StudioMiss
+              color = StudioMiss,
+              modifier = Modifier.weight(1f)
             )
           }
         }
@@ -142,7 +174,7 @@ fun PromptBox(
       // Input TextField
       OutlinedTextField(
         value = text,
-        onValueChange = onTextChanged,
+        onValueChange = { onTextChanged(it.take(limit)) },
         modifier = Modifier
           .fillMaxWidth()
           .testTag("input_${title.lowercase().replace(" ", "_")}"),

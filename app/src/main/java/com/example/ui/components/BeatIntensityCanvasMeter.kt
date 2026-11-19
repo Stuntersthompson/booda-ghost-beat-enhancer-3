@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -62,6 +64,7 @@ import kotlin.math.roundToInt
  * Real-time Canvas DSP spectrum & beat parameter meter displaying multi-band energy,
  * peak-hold caps, complexity %, and intensity % feedback inside the Groove Preview Monitor.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BeatIntensityCanvasMeter(
   snapshot: BeatMeterSnapshot,
@@ -150,23 +153,40 @@ fun BeatIntensityCanvasMeter(
       }
       .testTag("beat_intensity_canvas_meter")
   ) {
-    Row(
+    FlowRow(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
+      verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-      Row(
+      FlowRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(4.dp)
       ) {
+        val statusLabel = when {
+          snapshot.isMeasuredAudioSpectrum -> "REAL FFT SPECTRUM"
+          snapshot.audioDriven -> "ANALYZED AUDIO + PARAMS"
+          else -> "PARAM EST. · NO AUDIO"
+        }
+        val statusBg = when {
+          snapshot.isMeasuredAudioSpectrum -> Color(0x2210B981)
+          snapshot.audioDriven -> Color(0x2200D2FF)
+          else -> Color(0x22F5A524)
+        }
+        val statusTint = when {
+          snapshot.isMeasuredAudioSpectrum -> StudioWinner
+          snapshot.audioDriven -> StudioCyan
+          else -> AmberGold
+        }
         Surface(
-          color = if (snapshot.audioDriven) Color(0x2210B981) else Color(0x2200D2FF),
+          color = statusBg,
           shape = RoundedCornerShape(4.dp)
         ) {
           Text(
-            text = if (snapshot.audioDriven) "DSP AUDIO + PARAMS" else "PARAM SPECTRUM",
+            text = statusLabel,
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-            color = if (snapshot.audioDriven) StudioWinner else StudioCyan,
+            color = statusTint,
+            maxLines = 1,
+            softWrap = false,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
           )
         }
@@ -178,6 +198,8 @@ fun BeatIntensityCanvasMeter(
             text = snapshot.tierLabel,
             style = MonospaceMetric.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
             color = tierColor,
+            maxLines = 1,
+            softWrap = false,
             modifier = Modifier
               .padding(horizontal = 6.dp, vertical = 2.dp)
               .testTag("beat_meter_tier_badge")
@@ -193,12 +215,16 @@ fun BeatIntensityCanvasMeter(
           text = "INT ${snapshot.intensityScore}%",
           style = MonospaceMetric.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
           color = AmberGoldLight,
+          maxLines = 1,
+          softWrap = false,
           modifier = Modifier.testTag("beat_meter_intensity_value")
         )
         Text(
           text = "CPLX ${snapshot.complexityScore}%",
           style = MonospaceMetric.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
           color = StudioCyan,
+          maxLines = 1,
+          softWrap = false,
           modifier = Modifier.testTag("beat_meter_complexity_value")
         )
       }

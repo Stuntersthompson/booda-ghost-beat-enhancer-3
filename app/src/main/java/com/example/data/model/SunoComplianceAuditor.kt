@@ -19,9 +19,11 @@ data class ComplianceCheckResult(
 data class ComplianceAuditReport(
   val checks: List<ComplianceCheckResult>,
   val passedCount: Int,
-  val totalCount: Int
+  val totalCount: Int,
+  val detectedArtistNames: List<String> = emptyList()
 ) {
   val allPassed: Boolean get() = passedCount == totalCount
+  val noArtistNames: Boolean get() = detectedArtistNames.isEmpty()
 }
 
 data class ComplianceSnapshot(
@@ -86,6 +88,43 @@ object SunoComplianceAuditor {
 
   private val fallbackNegativeKeywords = listOf("no vocals", "no drums", "exclude", "without", "remove")
 
+  private val artistNameRegex = Regex(
+    """\b(?:Metro\s+Boomin|Southside|808\s+Mafia|Tay\s+Keith|Zaytoven|J\s+Dilla|Kanye\s+West|Ye|Travis\s+Scott|Playboi\s+Carti|Future|Young\s+Thug|Drake|Kendrick\s+Lamar|J\.?\s*Cole|Lil\s+Wayne|Chief\s+Keef|Pop\s+Smoke|Central\s+Cee|Ice\s+Spice|Sexyy\s+Red|GloRilla|21\s+Savage|Gunna|Lil\s+Baby|Lil\s+Uzi\s+Vert|Yeat|Pierre\s+Bourne|Pi'erre\s+Bourne|Wheezy|Turbo|Mustard|DJ\s+Mustard|Murda\s+Beatz|Timbaland|Pharrell|Neptunes|Dr\.?\s*Dre|Scott\s+Storch|Mannie\s+Fresh|Lex\s+Luger|TM88|Shawty\s+Redd|Alchemist|The\s+Alchemist|Madlib|Mad\s+Lib|MF\s+DOOM|Premiere|DJ\s+Premier|Pete\s+Rock|Just\s+Blaze|Havoc|RZA|Jeezy|Gucci\s+Mane|Rick\s+Ross|T-Pain|Snoop\s+Dogg|Nas|Tupac|2Pac|Biggie|Notorious\s+B\.?I\.?G\.?|Eminem|Jay-Z|Outkast|Three\s+6\s+Mafia|Juicy\s+J|DJ\s+Paul|Tommy\s+Wright\s+III|Nicki\s+Minaj|Cardi\s+B|Megan\s+Thee\s+Stallion|Doja\s+Cat|SZA|Frank\s+Ocean|Weeknd|The\s+Weeknd|Bryson\s+Tiller|Brent\s+Faiyaz|PartyNextDoor|Rod\s+Wave|NBA\s+YoungBoy|YoungBoy|Kodak\s+Black|Veeze|Rio\s+Da\s+Yung\s+OG|EST\s+Gee|BabyTron|BossMan\s+Dlow|Fredo\s+Santana|King\s+Von|Fivio\s+Foreign|Kay\s+Flock|Headie\s+One|Skepta|Stormzy|Burna\s+Boy|Wizkid|Rema|Tems|Bad\s+Bunny)\b""",
+    RegexOption.IGNORE_CASE
+  )
+
+  private val styleReferencePhraseRegex = Regex(
+    """\b(?:in\s+the\s+style\s+of|sounds?\s+like|inspired\s+by|type\s+beat)\b""",
+    RegexOption.IGNORE_CASE
+  )
+
+  fun findArtistNamesInStyle(stylePrompt: String): List<String> {
+    if (stylePrompt.isBlank()) return emptyList()
+    return artistNameRegex.findAll(stylePrompt)
+      .map { it.value.trim() }
+      .filter { it.isNotEmpty() }
+      .distinctBy { it.lowercase() }
+      .toList()
+  }
+
+  fun stripArtistNames(stylePrompt: String): String {
+    if (stylePrompt.isBlank()) return stylePrompt
+    var cleaned = stylePrompt
+    val matches = findArtistNamesInStyle(cleaned)
+    if (matches.isEmpty()) return cleaned
+    for (name in matches) {
+      cleaned = cleaned.replace(Regex("""\b${Regex.escape(name)}(?:'s|s')?\b""", RegexOption.IGNORE_CASE), "")
+    }
+    cleaned = cleaned.replace(styleReferencePhraseRegex, "")
+    return cleaned
+      .replace(Regex(",\\s*,+"), ",")
+      .replace(Regex("\\s{2,}"), " ")
+      .replace(Regex("\\s+([,.])"), "$1")
+      .trim()
+      .trimStart(',', ' ')
+      .trimEnd(',', ' ')
+  }
+
   fun findNegativeTermsInStyle(stylePrompt: String): List<String> {
     val phraseMatches = negativePhraseRegex.findAll(stylePrompt)
       .map { it.value.trim() }
@@ -109,6 +148,7 @@ object SunoComplianceAuditor {
     val hasEnd = lyricsMap.isNotBlank() && lyricsMap.trim().endsWith("[End]")
     val foundNegatives = findNegativeTermsInStyle(stylePrompt)
     val hasNegatives = foundNegatives.isNotEmpty()
+    val foundArtists = findArtistNamesInStyle(stylePrompt)
     val slidersValid = if (isPreserve) variety == 0 && audioInfluence in 75..85 else true
     val capsOk = stylePrompt.length <= STYLE_LIMIT &&
       lyricsMap.length <= LYRICS_LIMIT &&
@@ -174,7 +214,8 @@ object SunoComplianceAuditor {
     return ComplianceAuditReport(
       checks = checks,
       passedCount = passedCount,
-      totalCount = checks.size
+      totalCount = checks.size,
+      detectedArtistNames = foundArtists
     )
   }
 
@@ -306,6 +347,18 @@ object SunoComplianceAuditor {
     }
   }
 
+  fun autoFixArtistNames(snapshot: ComplianceSnapshot): ComplianceSnapshot {
+    val found = findArtistNamesInStyle(snapshot.stylePrompt)
+    if (found.isEmpty()) return snapshot
+    val cleaned = stripArtistNames(snapshot.stylePrompt).ifBlank {
+      if (snapshot.jobType == JobType.PRESERVE) LOCK_LINE else "Modern hip-hop instrumental, heavy 808, crisp drums"
+    }
+    return snapshot.copy(
+      stylePrompt = cleaned,
+      fixSummary = "Removed ${found.size} artist/producer reference(s)"
+    )
+  }
+
   fun autoFixAll(
     snapshot: ComplianceSnapshot,
     activeLane: String
@@ -317,8 +370,11 @@ object SunoComplianceAuditor {
       ComplianceRuleId.PRESERVE_SLIDERS,
       ComplianceRuleId.CHARACTER_CAPS
     )
-    var current = snapshot
+    var current = autoFixArtistNames(snapshot)
     val applied = mutableListOf<String>()
+    if (current != snapshot && current.fixSummary.isNotBlank()) {
+      applied.add(current.fixSummary)
+    }
     for (rule in order) {
       val next = autoFixRule(rule, current, activeLane)
       if (next != current) {

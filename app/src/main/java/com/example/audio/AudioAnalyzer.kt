@@ -16,7 +16,7 @@ data class AudioAnalysisResult(
   val fileName: String,
   val durationSec: Double,
   val bpm: Double?,
-  val bpmConfidence: String, // "high", "medium", "low"
+  val bpmConfidence: String, // "high", "medium", "low", "estimate", "unread"
   val keyName: String?,
   val keyClear: Boolean,
   val rmsDb: Double,
@@ -34,7 +34,12 @@ data class AudioAnalysisResult(
   val key: String? = null,
   val mode: String? = null,
   val bpmConfidenceScore: Double = 0.0,
-  val keyConfidenceScore: Double = 0.0
+  val keyConfidenceScore: Double = 0.0,
+  val isAudioMeasured: Boolean = true,
+  val isSpectralMeasured: Boolean = true,
+  val isTempoEstimate: Boolean = false,
+  val measuredSpectrumBands: List<Float> = emptyList(),
+  val analysisNote: String? = null
 ) {
   val waveformPeaksArray: FloatArray by lazy(LazyThreadSafetyMode.NONE) {
     waveformPeaks.toFloatArray()
@@ -46,11 +51,19 @@ data class AnalyzedClipOutput(
   val multimodalWavBytes: ByteArray?
 )
 
+internal data class SpectralFeatures(
+  val lowShare: Double,
+  val centroidHz: Double,
+  val isMeasured: Boolean,
+  val spectrumBands12: List<Float>
+)
+
 internal data class TempoEstimate(
   val bpm: Double?,
   val confidenceLabel: String,
   val confidenceScore: Double,
-  val onsetRate: Double
+  val onsetRate: Double,
+  val isEstimate: Boolean = false
 )
 
 internal data class KeyEstimate(
@@ -136,7 +149,7 @@ class AudioAnalyzer(private val context: Context) {
   @Synchronized
   fun analyzeFloatSamples(fileName: String, samples: FloatArray, sampleRate: Int): AudioAnalysisResult {
     if (samples.isEmpty() || sampleRate <= 0) {
-      return fallbackResult(fileName)
+      return unreadResult(fileName, "Could not decode readable PCM samples from this audio file.")
     }
 
     val durationSec = samples.size.toDouble() / sampleRate
@@ -151,7 +164,17 @@ class AudioAnalyzer(private val context: Context) {
     val rmsDb = if (rms > 1e-5) 20.0 * log10(rms) else -80.0
     val peakDb = if (peak > 1e-5) 20.0 * log10(peak) else -80.0
 
-    val (lowShare, centroidHz) = calculateSpectralFeatures(samples, sampleRate)
+    if (peak <= 1e-5) {
+      return unreadResult(
+        fileName = fileName,
+        reason = "Audio stream appears completely silent (peak <= -80 dBFS).",
+        durationSec = durationSec
+      )
+    }
+
+    val spectral = calculateSpectralFeaturesDetailed(samples, sampleRate)
+    val lowShare = spectral.lowShare
+    val centroidHz = spectral.centroidHz
     val keyEstimate = estimateMusicalKeyDetailed(samples, sampleRate)
     val tempoEstimate = estimateTempoDetailed(samples, sampleRate)
 
@@ -159,22 +182,30 @@ class AudioAnalyzer(private val context: Context) {
     val bucketSize = max(1, samples.size / numBuckets)
     val peaks = ArrayList<Float>(numBuckets)
     for (b in 0 until numBuckets) {
-      var bPeak = 0.06f
+      var bPeak = 0.04f
       val start = b * bucketSize
       val end = if (b == numBuckets - 1) samples.size else min(samples.size, start + bucketSize)
       for (i in start until end) {
         val a = abs(samples[i])
         if (a > bPeak) bPeak = a
       }
-      peaks.add(bPeak.coerceIn(0.06f, 1.0f))
+      peaks.add(bPeak.coerceIn(0.04f, 1.0f))
     }
 
-    val resolvedBpm = tempoEstimate.bpm ?: 130.0
-    val suggestedLane = rankBestLane(resolvedBpm, centroidHz, lowShare, tempoEstimate.onsetRate)
-    val pocketLabel = "${resolvedBpm.roundToInt()} BPM · ${if (centroidHz > 2800) "Bright" else "Dark"} · ${if (lowShare > 0.36) "Sub-heavy" else "Balanced"}"
+    val suggestedLane = rankBestLane(tempoEstimate.bpm, centroidHz, lowShare, tempoEstimate.onsetRate, spectral.isMeasured)
+    val bpmTag = tempoEstimate.bpm?.let {
+      if (tempoEstimate.isEstimate) "${it.roundToInt()} BPM (Est.)" else "${it.roundToInt()} BPM"
+    } ?: "BPM Unread"
+    val toneTag = if (!spectral.isMeasured) {
+      "Spectrum Unread"
+    } else {
+      "${if (centroidHz > 2800) "Bright" else "Dark"} · ${if (lowShare > 0.36) "Sub-heavy" else "Balanced"}"
+    }
+    val pocketLabel = "$bpmTag · $toneTag"
 
     val promptPreserve = "$LOCK_LINE. Add tight $suggestedLane drums underneath only, spice only, sample stays lead."
-    val promptOriginal = "$suggestedLane instrumental, ${resolvedBpm.roundToInt()} BPM, heavy 808, crisp percussion, full arrangement."
+    val bpmClause = tempoEstimate.bpm?.let { ", ${it.roundToInt()} BPM" } ?: ""
+    val promptOriginal = "$suggestedLane instrumental$bpmClause, heavy 808, crisp percussion, full arrangement."
 
     return AudioAnalysisResult(
       fileName = fileName,
@@ -196,7 +227,20 @@ class AudioAnalyzer(private val context: Context) {
       key = keyEstimate.key,
       mode = keyEstimate.mode,
       bpmConfidenceScore = tempoEstimate.confidenceScore,
-      keyConfidenceScore = keyEstimate.confidenceScore
+      keyConfidenceScore = keyEstimate.confidenceScore,
+      isAudioMeasured = true,
+      isSpectralMeasured = spectral.isMeasured,
+      isTempoEstimate = tempoEstimate.isEstimate,
+      measuredSpectrumBands = spectral.spectrumBands12,
+      analysisNote = when {
+        tempoEstimate.bpm == null && keyEstimate.keyName == null ->
+          "Partial DSP read: clip too short or non-tonal for full tempo and key lock."
+        tempoEstimate.bpm == null ->
+          "Tempo could not be locked cleanly (clip short or lacks steady transient pulse)."
+        tempoEstimate.isEstimate ->
+          "Tempo is a low-confidence estimate — verify with x0.5 / x2.0 if needed."
+        else -> null
+      }
     )
   }
 
@@ -260,14 +304,22 @@ class AudioAnalyzer(private val context: Context) {
 
   /**
    * Multi-frame Hamming-windowed FFT spectral analysis across up to 24 evenly spaced active frames
-   * using pre-allocated FFT workspace buffers.
+   * using pre-allocated FFT workspace buffers. Computes real 12-band spectrum magnitudes alongside
+   * honest unread state on silent or sub-window clips.
    */
-  internal fun calculateSpectralFeatures(samples: FloatArray, sampleRate: Int): Pair<Double, Double> {
-    if (samples.size < SPECTRAL_FFT_SIZE) return Pair(0.35, 2500.0)
+  internal fun calculateSpectralFeaturesDetailed(samples: FloatArray, sampleRate: Int): SpectralFeatures {
+    if (samples.size < SPECTRAL_FFT_SIZE || sampleRate <= 0) {
+      return SpectralFeatures(lowShare = 0.0, centroidHz = 0.0, isMeasured = false, spectrumBands12 = emptyList())
+    }
 
     val maxStart = samples.size - SPECTRAL_FFT_SIZE
     val frameStep = max(SPECTRAL_FFT_SIZE / 2, maxStart / max(1, TARGET_ANALYSIS_FRAMES - 1))
     val binWidth = sampleRate.toDouble() / SPECTRAL_FFT_SIZE
+
+    val bandCenters = doubleArrayOf(32.0, 63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 6000.0, 8000.0, 12000.0, 16000.0)
+    val bandEdges = doubleArrayOf(20.0, 45.0, 90.0, 180.0, 355.0, 710.0, 1400.0, 2800.0, 5000.0, 7000.0, 10000.0, 14000.0, 20000.0)
+    val bandEnergyAccum = DoubleArray(bandCenters.size)
+    val bandBinCounts = IntArray(bandCenters.size)
 
     var lowEnergyTotal = 0.0
     var totalEnergyTotal = 0.0
@@ -285,7 +337,7 @@ class AudioAnalyzer(private val context: Context) {
       }
 
       val frameRms = sqrt(frameSumSq / SPECTRAL_FFT_SIZE)
-      if (frameRms > 1e-3) {
+      if (frameRms > 1e-4) {
         fftRadix2(spectralReal, spectralImag)
         for (k in 1 until SPECTRAL_FFT_SIZE / 2) {
           val mag = hypot(spectralReal[k], spectralImag[k])
@@ -295,19 +347,48 @@ class AudioAnalyzer(private val context: Context) {
           if (freq <= 160.0) {
             lowEnergyTotal += mag
           }
+          for (b in bandCenters.indices) {
+            if (freq >= bandEdges[b] && freq < bandEdges[b + 1]) {
+              bandEnergyAccum[b] += mag
+              if (activeFrames == 0) bandBinCounts[b]++
+              break
+            }
+          }
         }
         activeFrames++
       }
       offset += frameStep
     }
 
-    if (totalEnergyTotal <= 1e-9) {
-      return Pair(0.35, 2500.0)
+    if (totalEnergyTotal <= 1e-9 || activeFrames == 0) {
+      return SpectralFeatures(lowShare = 0.0, centroidHz = 0.0, isMeasured = false, spectrumBands12 = emptyList())
     }
 
-    val lowShare = (lowEnergyTotal / totalEnergyTotal).coerceIn(0.05, 0.95)
-    val centroid = (weightedFreqTotal / totalEnergyTotal).coerceIn(300.0, 9000.0)
-    return Pair(lowShare, centroid)
+    val lowShare = (lowEnergyTotal / totalEnergyTotal).coerceIn(0.0, 1.0)
+    val centroid = (weightedFreqTotal / totalEnergyTotal).coerceIn(40.0, (sampleRate / 2.0).coerceAtLeast(300.0))
+
+    // Normalize 12 frequency bands using log-scaled mean bin energy per band relative to peak band
+    val meanBandVals = DoubleArray(bandCenters.size) { b ->
+      val avg = bandEnergyAccum[b] / activeFrames.toDouble()
+      val widthNorm = sqrt(max(1, bandBinCounts[b]).toDouble())
+      ln(1.0 + (avg / widthNorm) * 0.45)
+    }
+    val maxBand = meanBandVals.maxOrNull()?.coerceAtLeast(1e-6) ?: 1.0
+    val bands12 = meanBandVals.map { v ->
+      (v / maxBand).toFloat().coerceIn(0.05f, 1.0f)
+    }
+
+    return SpectralFeatures(
+      lowShare = lowShare,
+      centroidHz = centroid,
+      isMeasured = true,
+      spectrumBands12 = bands12
+    )
+  }
+
+  internal fun calculateSpectralFeatures(samples: FloatArray, sampleRate: Int): Pair<Double, Double> {
+    val features = calculateSpectralFeaturesDetailed(samples, sampleRate)
+    return Pair(features.lowShare, features.centroidHz)
   }
 
   /**
@@ -315,8 +396,8 @@ class AudioAnalyzer(private val context: Context) {
    * and correlating pitch-class energy against major and minor profiles.
    */
   internal fun estimateMusicalKeyDetailed(samples: FloatArray, sampleRate: Int): KeyEstimate {
-    if (samples.size < CHROMA_FFT_SIZE) {
-      return KeyEstimate(key = "C", mode = "Minor", keyName = "C minor", clear = false, confidenceScore = 0.35)
+    if (samples.size < CHROMA_FFT_SIZE || sampleRate <= 0) {
+      return KeyEstimate(key = null, mode = null, keyName = null, clear = false, confidenceScore = 0.0)
     }
 
     chromaAccumulator.fill(0.0)
@@ -402,6 +483,16 @@ class AudioAnalyzer(private val context: Context) {
       .coerceIn(0.0, 1.0)
     val clear = margin > 0.07 && bestScore > 0.50
 
+    if (bestScore < 0.25) {
+      return KeyEstimate(
+        key = null,
+        mode = null,
+        keyName = null,
+        clear = false,
+        confidenceScore = round(confidenceScore * 1000.0) / 1000.0
+      )
+    }
+
     return KeyEstimate(
       key = bestRoot,
       mode = bestMode,
@@ -477,10 +568,13 @@ class AudioAnalyzer(private val context: Context) {
    * Bands: Low Kick/Sub (20–180 Hz), Mid Snare/Chop (180–1400 Hz), High Hats/Transients (1400–6500 Hz).
    */
   internal fun estimateTempoDetailed(samples: FloatArray, sampleRate: Int): TempoEstimate {
+    if (sampleRate <= 0) {
+      return TempoEstimate(bpm = null, confidenceLabel = "unread", confidenceScore = 0.0, onsetRate = 0.0, isEstimate = false)
+    }
     val numHops = (samples.size - TEMPO_FFT_SIZE) / TEMPO_HOP_SIZE + 1
     val durationSec = samples.size.toDouble() / sampleRate
     if (samples.size < TEMPO_FFT_SIZE || numHops < 24 || durationSec < 0.8) {
-      return TempoEstimate(bpm = 130.0, confidenceLabel = "medium", confidenceScore = 0.45, onsetRate = 2.0)
+      return TempoEstimate(bpm = null, confidenceLabel = "unread", confidenceScore = 0.0, onsetRate = 0.0, isEstimate = false)
     }
 
     val binWidth = sampleRate.toDouble() / TEMPO_FFT_SIZE
@@ -558,7 +652,8 @@ class AudioAnalyzer(private val context: Context) {
         lastOnsetHop = h
       }
     }
-    val onsetRate = if (durationSec > 0.0) onsets / durationSec else 2.0
+    val onsetRate = if (durationSec > 0.0) onsets / durationSec else 0.0
+    val roundedOnsetRate = round(onsetRate * 10.0) / 10.0
 
     val frameRate = sampleRate.toDouble() / TEMPO_HOP_SIZE
     val minBpm = 60
@@ -567,13 +662,24 @@ class AudioAnalyzer(private val context: Context) {
     val maxLag = min(numHops / 2, ceil(60.0 * frameRate / minBpm).toInt())
 
     if (maxLag <= minLag) {
-      val fallbackBpm = (onsetRate * 60.0).coerceIn(70.0, 165.0)
-      return TempoEstimate(
-        bpm = round(fallbackBpm * 10.0) / 10.0,
-        confidenceLabel = "low",
-        confidenceScore = 0.25,
-        onsetRate = round(onsetRate * 10.0) / 10.0
-      )
+      return if (onsets >= 2 && onsetRate > 0.5) {
+        val estBpm = (onsetRate * 60.0).coerceIn(70.0, 165.0)
+        TempoEstimate(
+          bpm = round(estBpm * 10.0) / 10.0,
+          confidenceLabel = "estimate",
+          confidenceScore = 0.25,
+          onsetRate = roundedOnsetRate,
+          isEstimate = true
+        )
+      } else {
+        TempoEstimate(
+          bpm = null,
+          confidenceLabel = "unread",
+          confidenceScore = 0.0,
+          onsetRate = roundedOnsetRate,
+          isEstimate = false
+        )
+      }
     }
 
     val bandZeroEnergy = DoubleArray(SUB_BAND_COUNT)
@@ -594,10 +700,11 @@ class AudioAnalyzer(private val context: Context) {
 
     if (totalActiveBandVar <= 1e-10) {
       return TempoEstimate(
-        bpm = 130.0,
-        confidenceLabel = "low",
-        confidenceScore = 0.20,
-        onsetRate = round(onsetRate * 10.0) / 10.0
+        bpm = null,
+        confidenceLabel = "unread",
+        confidenceScore = 0.0,
+        onsetRate = roundedOnsetRate,
+        isEstimate = false
       )
     }
 
@@ -653,6 +760,15 @@ class AudioAnalyzer(private val context: Context) {
     val denom = 2.0 * (y0 - 2.0 * y1 + y2)
     val delta = if (abs(denom) > 1e-9) ((y0 - y2) / denom).coerceIn(-0.5, 0.5) else 0.0
     var refinedBpm = 60.0 * frameRate / (bestLag + delta)
+    if (refinedBpm.isNaN() || refinedBpm.isInfinite() || refinedBpm <= 0.0) {
+      return TempoEstimate(
+        bpm = null,
+        confidenceLabel = "unread",
+        confidenceScore = 0.0,
+        onsetRate = roundedOnsetRate,
+        isEstimate = false
+      )
+    }
 
     while (refinedBpm < 65.0) refinedBpm *= 2.0
     while (refinedBpm > 175.0) refinedBpm /= 2.0
@@ -663,14 +779,15 @@ class AudioAnalyzer(private val context: Context) {
     val confidenceLabel = when {
       peakNorm >= 0.35 && durationSec >= 3.0 -> "high"
       peakNorm >= 0.16 -> "medium"
-      else -> "low"
+      else -> "estimate"
     }
 
     return TempoEstimate(
       bpm = round(refinedBpm * 10.0) / 10.0,
       confidenceLabel = confidenceLabel,
       confidenceScore = round(confidenceScore * 1000.0) / 1000.0,
-      onsetRate = round(onsetRate * 10.0) / 10.0
+      onsetRate = roundedOnsetRate,
+      isEstimate = confidenceLabel == "estimate"
     )
   }
 
@@ -679,7 +796,23 @@ class AudioAnalyzer(private val context: Context) {
     return Triple(est.bpm, est.confidenceLabel, est.onsetRate)
   }
 
-  private fun rankBestLane(bpm: Double, centroid: Double, lowShare: Double, density: Double): String {
+  private fun rankBestLane(
+    bpm: Double?,
+    centroid: Double,
+    lowShare: Double,
+    density: Double,
+    spectralMeasured: Boolean
+  ): String {
+    if (bpm == null && !spectralMeasured) return "Trap"
+    if (bpm == null) {
+      return when {
+        lowShare > 0.45 && centroid < 2200 -> "Memphis phonk / dark trap"
+        centroid < 2000 -> "Boom bap"
+        lowShare > 0.42 -> "Trap"
+        centroid > 3200 -> "Detroit trap"
+        else -> "Trap"
+      }
+    }
     return when {
       bpm in 130.0..155.0 && lowShare > 0.40 -> "Trap"
       bpm in 135.0..150.0 && centroid < 2500 -> "NY drill"
@@ -863,45 +996,37 @@ class AudioAnalyzer(private val context: Context) {
     }
   }
 
-  private fun fallbackResult(fileName: String): AudioAnalysisResult {
+  private fun unreadResult(
+    fileName: String,
+    reason: String,
+    durationSec: Double = 0.0
+  ): AudioAnalysisResult {
     return AudioAnalysisResult(
       fileName = fileName,
-      durationSec = 15.0,
-      bpm = 130.0,
-      bpmConfidence = "medium",
-      keyName = "C minor",
-      keyClear = true,
-      rmsDb = -18.5,
-      peakDb = -2.1,
-      lowShare = 0.42,
-      centroidHz = 2450.0,
-      onsetRate = 2.1,
+      durationSec = durationSec,
+      bpm = null,
+      bpmConfidence = "unread",
+      keyName = null,
+      keyClear = false,
+      rmsDb = -80.0,
+      peakDb = -80.0,
+      lowShare = 0.0,
+      centroidHz = 0.0,
+      onsetRate = 0.0,
       suggestedLane = "Trap",
-      pocketLabel = "130 BPM · Balanced · Sub-heavy",
-      promptPreserve = "$LOCK_LINE. Add tight Trap drums underneath only, spice only, sample stays lead.",
-      promptOriginal = "Trap instrumental, 130 BPM, heavy 808, crisp percussion, full arrangement.",
-      waveformPeaks = generateGroovePeaks(),
-      key = "C",
-      mode = "Minor",
-      bpmConfidenceScore = 0.65,
-      keyConfidenceScore = 0.72
+      pocketLabel = "Unread · No decodable audio",
+      promptPreserve = "$LOCK_LINE. Add drums underneath only, spice only, sample stays lead.",
+      promptOriginal = "Instrumental beat, heavy 808, crisp percussion, full arrangement.",
+      waveformPeaks = emptyList(),
+      key = null,
+      mode = null,
+      bpmConfidenceScore = 0.0,
+      keyConfidenceScore = 0.0,
+      isAudioMeasured = false,
+      isSpectralMeasured = false,
+      isTempoEstimate = false,
+      measuredSpectrumBands = emptyList(),
+      analysisNote = reason
     )
-  }
-
-  private fun generateGroovePeaks(): List<Float> {
-    val list = ArrayList<Float>(100)
-    for (i in 0 until 100) {
-      val stepInBar = i % 16
-      val peak = when (stepInBar) {
-        0 -> 0.95f
-        4 -> 0.45f
-        8 -> 0.85f
-        12 -> 0.50f
-        14 -> 0.65f
-        else -> 0.25f + ((i * 7) % 20) / 100f
-      }
-      list.add(peak.coerceIn(0.1f, 1.0f))
-    }
-    return list
   }
 }

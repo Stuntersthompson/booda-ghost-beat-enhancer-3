@@ -48,6 +48,7 @@ import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.StudioTab
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AnalyzeScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
@@ -219,6 +220,13 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
               onBpmMultiplier = { viewModel.adjustBpmMultiplier(it) }
             )
           }
+          if (analysis!!.analysisNote != null || !analysis!!.isAudioMeasured) {
+            item {
+              AnalysisHonestNoticeBanner(
+                note = analysis!!.analysisNote ?: "Audio signal metrics could not be reliably measured; fields show Unread or Estimate."
+              )
+            }
+          }
         }
 
         // Right Pane: Honesty Words + Gemini Analyst + Handoff Actions
@@ -364,6 +372,13 @@ fun AnalyzeScreen(viewModel: MainViewModel) {
               analysis = analysis!!,
               onBpmMultiplier = { viewModel.adjustBpmMultiplier(it) }
             )
+          }
+          if (analysis!!.analysisNote != null || !analysis!!.isAudioMeasured) {
+            item {
+              AnalysisHonestNoticeBanner(
+                note = analysis!!.analysisNote ?: "Audio signal metrics could not be reliably measured; fields show Unread or Estimate."
+              )
+            }
           }
 
           item {
@@ -544,6 +559,33 @@ private fun AudioErrorNoticeBanner(
       ) {
         Icon(Icons.Default.Close, contentDescription = "Dismiss audio error", tint = TextSecondary, modifier = Modifier.size(18.dp))
       }
+    }
+  }
+}
+
+@Composable
+private fun AnalysisHonestNoticeBanner(note: String) {
+  Surface(
+    color = Color(0x1FF5A524),
+    shape = RoundedCornerShape(10.dp),
+    modifier = Modifier
+      .fillMaxWidth()
+      .border(1.dp, AmberGold.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+      .testTag("analyze_honest_dsp_notice")
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 12.dp, vertical = 10.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Icon(Icons.Default.Info, contentDescription = "DSP measurement notice", tint = AmberGold, modifier = Modifier.size(18.dp))
+      Spacer(modifier = Modifier.width(8.dp))
+      Text(
+        text = note,
+        style = MaterialTheme.typography.bodySmall,
+        color = TextPrimary
+      )
     }
   }
 }
@@ -786,6 +828,7 @@ private fun AnalyzedWaveformSection(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SampleHonestyCard(
   analysis: AudioAnalysisResult,
@@ -811,15 +854,21 @@ private fun SampleHonestyCard(
       .border(1.dp, StudioBorder, RoundedCornerShape(12.dp))
   ) {
     Column(modifier = Modifier.padding(14.dp)) {
-      Row(
+      FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(6.dp)
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Icon(Icons.Default.RecordVoiceOver, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
           Spacer(modifier = Modifier.width(6.dp))
-          Text("WHAT THE SAMPLE SAYS", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+          Text(
+            text = "WHAT THE SAMPLE SAYS",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = AmberGold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
         }
         Surface(
           color = Color(0x3310B981),
@@ -829,6 +878,8 @@ private fun SampleHonestyCard(
             text = "HONESTY LAW: NO GUESSING",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
             color = StudioWinner,
+            maxLines = 1,
+            softWrap = false,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
           )
         }
@@ -909,10 +960,10 @@ private fun SampleHonestyCard(
       }
 
       Spacer(modifier = Modifier.height(6.dp))
-      Row(
+      FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(6.dp)
       ) {
         if (analysis.sampleWordsText != null) {
           TextButton(
@@ -991,10 +1042,21 @@ private fun GeminiAnalystCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier
+            .weight(1f)
+            .padding(end = 8.dp)
+        ) {
           Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = StudioCyan, modifier = Modifier.size(18.dp))
           Spacer(modifier = Modifier.width(6.dp))
-          Text("GEMINI MULTIMODAL BEAT ANALYST", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = StudioCyan)
+          Text(
+            text = "GEMINI MULTIMODAL BEAT ANALYST",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = StudioCyan,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
         }
         val statusLabel = when (aiState) {
           is AiConsultationUiState.Loading -> "LIVE"
@@ -1204,7 +1266,16 @@ private fun GeminiAnalystCard(
                   horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Text(sug.title, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = AmberGold)
+                  Text(
+                    text = sug.title,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = AmberGold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                      .weight(1f)
+                      .padding(end = 6.dp)
+                  )
                   Row(verticalAlignment = Alignment.CenterVertically) {
                     var sugCopiedFlash by remember { mutableStateOf(false) }
                     LaunchedEffect(sugCopiedFlash) {
@@ -1310,12 +1381,27 @@ private fun HandoffActionsColumn(
 
     OutlinedButton(
       onClick = {
+        val tempoText = analysis.bpm?.let {
+          val est = if (analysis.isTempoEstimate) " (estimate)" else ""
+          "${it.toInt()} BPM$est (${analysis.bpmConfidence} confidence)"
+        } ?: "Unread"
+        val centroidText = if (analysis.isAudioMeasured && analysis.isSpectralMeasured) {
+          "${analysis.centroidHz.toInt()} Hz (${analysis.pocketLabel})"
+        } else {
+          "Unread (${analysis.pocketLabel})"
+        }
+        val levelText = if (analysis.isAudioMeasured) {
+          "Peak ${"%.1f".format(analysis.peakDb)} dBFS · RMS ${"%.1f".format(analysis.rmsDb)} dBFS"
+        } else {
+          "Unread"
+        }
         val report = """=== BOODA BEAT ANALYSIS REPORT ===
 File: ${analysis.fileName}
-Tempo: ${analysis.bpm?.toInt() ?: 0} BPM (${analysis.bpmConfidence} confidence)
+Tempo: $tempoText
 Musical Key: ${analysis.keyName ?: "Unread"}
-Brightness Centroid: ${analysis.centroidHz.toInt()} Hz (${analysis.pocketLabel})
-Onset Density: ${analysis.onsetRate} hits/sec
+Levels: $levelText
+Brightness Centroid: $centroidText
+Onset Density: ${if (analysis.isAudioMeasured) "${analysis.onsetRate} hits/sec" else "Unread"}
 Suggested Lane: ${analysis.suggestedLane}
 Sample Vocals: ${heardVocalText ?: (analysis.sampleWordsText ?: "No clear words isolated")}
 

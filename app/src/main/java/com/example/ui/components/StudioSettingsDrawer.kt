@@ -82,20 +82,12 @@ fun StudioSettingsDrawerSheet(
           verticalAlignment = Alignment.CenterVertically,
           modifier = Modifier.weight(1f)
         ) {
-          Box(
-            modifier = Modifier
-              .size(34.dp)
-              .clip(RoundedCornerShape(8.dp))
-              .background(AmberGold),
-            contentAlignment = Alignment.Center
-          ) {
-            Icon(
-              imageVector = Icons.Default.Settings,
-              contentDescription = null,
-              tint = Color.Black,
-              modifier = Modifier.size(20.dp)
-            )
-          }
+          BrandLogoImage(
+            height = 40.dp,
+            contentDescription = "BooDa Beat Enhancer official logo",
+            framed = true,
+            modifier = Modifier.testTag("settings_drawer_logo")
+          )
           Spacer(modifier = Modifier.width(10.dp))
           Column {
             Text(
@@ -150,7 +142,12 @@ fun StudioSettingsDrawerSheet(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
+            ) {
               Icon(
                 imageVector = Icons.Default.GraphicEq,
                 contentDescription = null,
@@ -161,7 +158,9 @@ fun StudioSettingsDrawerSheet(
               Text(
                 text = "Visualizer Sensitivity",
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                color = TextPrimary
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
             }
 
@@ -372,7 +371,22 @@ private fun SettingInfoRow(title: String, value: String) {
     horizontalArrangement = Arrangement.SpaceBetween,
     verticalAlignment = Alignment.CenterVertically
   ) {
-    Text(title, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-    Text(value, style = MonospaceMetric.copy(fontSize = 11.sp), color = TextPrimary)
+    Text(
+      text = title,
+      style = MaterialTheme.typography.bodySmall,
+      color = TextSecondary,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+      modifier = Modifier
+        .weight(1f)
+        .padding(end = 8.dp)
+    )
+    Text(
+      text = value,
+      style = MonospaceMetric.copy(fontSize = 11.sp),
+      color = TextPrimary,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis
+    )
   }
 }

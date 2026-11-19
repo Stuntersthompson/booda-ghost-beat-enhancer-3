@@ -116,6 +116,12 @@ fun AdvisorScreen(viewModel: MainViewModel) {
             )
           }
           item {
+            ArtistNameHygieneCard(
+              report = auditReport,
+              onStripArtistNames = { viewModel.autoFixAllCompliance(context) }
+            )
+          }
+          item {
             AdvisorLiveResearchCard(
               state = searchGroundingState,
               onSearch = { q -> viewModel.searchSunoKnowledge(q) },
@@ -170,6 +176,12 @@ fun AdvisorScreen(viewModel: MainViewModel) {
           )
         }
         item {
+          ArtistNameHygieneCard(
+            report = auditReport,
+            onStripArtistNames = { viewModel.autoFixAllCompliance(context) }
+          )
+        }
+        item {
           AdvisorLiveResearchCard(
             state = searchGroundingState,
             onSearch = { q -> viewModel.searchSunoKnowledge(q) },
@@ -214,7 +226,10 @@ private fun AdvisorLiveResearchCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.weight(1f).padding(end = 6.dp)
+        ) {
           Icon(
             imageVector = Icons.Default.TravelExplore,
             contentDescription = "Google Search Grounding",
@@ -225,7 +240,9 @@ private fun AdvisorLiveResearchCard(
           Text(
             text = "LIVE STUDIO RESEARCH (SEARCH GROUNDED)",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = StudioCyan
+            color = StudioCyan,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
           )
         }
         Surface(
@@ -521,6 +538,7 @@ private fun SearchGroundedAnswerPanel(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LiveAuditReportCard(
   report: ComplianceAuditReport,
@@ -607,18 +625,18 @@ private fun LiveAuditReportCard(
               .border(0.5.dp, StudioCyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
               .testTag("advisor_undo_banner")
           ) {
-            Row(
+            FlowRow(
               modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 6.dp),
               horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
+              verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
               Text(
                 text = undoSnapshot.fixSummary.ifBlank { "Applied compliance fix" },
                 style = MaterialTheme.typography.labelSmall,
                 color = StudioCyan,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f, fill = false)
               )
               Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
@@ -721,6 +739,87 @@ private fun AuditCheckItem(
           style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
           color = AmberGold
         )
+      }
+    }
+  }
+}
+
+@Composable
+private fun ArtistNameHygieneCard(
+  report: ComplianceAuditReport,
+  onStripArtistNames: () -> Unit
+) {
+  Surface(
+    color = StudioCard,
+    shape = RoundedCornerShape(12.dp),
+    modifier = Modifier
+      .fillMaxWidth()
+      .border(
+        1.dp,
+        if (report.noArtistNames) StudioWinner.copy(alpha = 0.35f) else StudioMiss.copy(alpha = 0.55f),
+        RoundedCornerShape(12.dp)
+      )
+      .testTag("advisor_artist_hygiene_card")
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "ARTIST NAME HYGIENE",
+          style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+          color = AmberGold,
+          modifier = Modifier.weight(1f).padding(end = 8.dp),
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+        Surface(
+          color = if (report.noArtistNames) StudioWinner.copy(alpha = 0.16f) else StudioMiss.copy(alpha = 0.16f),
+          shape = RoundedCornerShape(6.dp)
+        ) {
+          Text(
+            text = if (report.noArtistNames) "CLEAN" else "ARTISTS DETECTED",
+            style = MonospaceMetric.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+            color = if (report.noArtistNames) StudioWinner else StudioMiss,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(6.dp))
+      if (report.noArtistNames) {
+        Text(
+          text = "Zero artist or producer names in Style Prompt. Suno v6 style tags remain policy-clean.",
+          style = MaterialTheme.typography.labelSmall,
+          color = TextSecondary
+        )
+      } else {
+        Text(
+          text = "Detected reference(s): ${report.detectedArtistNames.joinToString(", ")}. Replace artist names with pure sonic descriptors.",
+          style = MaterialTheme.typography.labelSmall,
+          color = StudioMiss
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Button(
+          onClick = onStripArtistNames,
+          colors = ButtonDefaults.buttonColors(containerColor = AmberGold),
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics { contentDescription = "Strip artist names from Style Prompt" }
+            .testTag("action_strip_artist_names")
+        ) {
+          Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = "Strip Artist Names",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = Color.Black
+          )
+        }
       }
     }
   }
