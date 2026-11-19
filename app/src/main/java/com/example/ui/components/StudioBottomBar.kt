@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
 import com.example.viewmodel.StudioTab
+import kotlinx.coroutines.flow.first
 
 private fun tabIconAndLabel(tab: StudioTab): Pair<ImageVector, String> {
   return when (tab) {
@@ -59,7 +61,15 @@ fun StudioBottomBar(
   LaunchedEffect(currentTab) {
     val idx = tabs.indexOf(currentTab)
     if (idx >= 0) {
-      listState.animateScrollToItem(idx)
+      snapshotFlow { listState.layoutInfo.visibleItemsInfo.isNotEmpty() }.first { it }
+      val layoutInfo = listState.layoutInfo
+      val visibleItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
+      val isFullyVisible = visibleItem != null &&
+        visibleItem.offset >= layoutInfo.viewportStartOffset &&
+        (visibleItem.offset + visibleItem.size) <= layoutInfo.viewportEndOffset
+      if (!isFullyVisible) {
+        listState.animateScrollToItem(idx)
+      }
     }
   }
 

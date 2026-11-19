@@ -3,16 +3,21 @@ package com.example
 import android.app.Application
 import android.content.Context
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
@@ -55,7 +60,7 @@ import kotlin.math.exp
 import kotlin.math.sin
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], qualifiers = "w360dp-h720dp-xhdpi")
 class FullAuditUpgradeRobolectricTest {
 
   @get:Rule
@@ -132,7 +137,7 @@ class FullAuditUpgradeRobolectricTest {
 
     composeTestRule.setContent {
       BooDaBeatTheme {
-        Box(modifier = Modifier.requiredSize(360.dp, 720.dp)) {
+        Box(modifier = Modifier.fillMaxSize()) {
           androidx.compose.foundation.layout.Column {
             StudioTopBar(
               activeLane = "Memphis phonk / dark trap",
@@ -208,7 +213,7 @@ class FullAuditUpgradeRobolectricTest {
 
     composeTestRule.setContent {
       BooDaBeatTheme {
-        Box(modifier = Modifier.requiredSize(360.dp, 720.dp)) {
+        Box(modifier = Modifier.fillMaxSize()) {
           AudioMeterCard(
             analysis = unread,
             onBpmMultiplier = {}
@@ -281,15 +286,17 @@ class FullAuditUpgradeRobolectricTest {
 
     composeTestRule.setContent {
       BooDaBeatTheme {
-        Box(modifier = Modifier.requiredSize(360.dp, 720.dp)) {
+        Box(modifier = Modifier.fillMaxSize()) {
           SimpleScreen(viewModel = vm)
         }
       }
     }
     composeTestRule.waitForIdle()
 
+    composeTestRule.onNodeWithTag("simple_list")
+      .performScrollToNode(hasTestTag("action_send_simple_to_build"))
     val sendBtn = composeTestRule.onNodeWithTag("action_send_simple_to_build")
-    sendBtn.assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
+    sendBtn.performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp).performClick()
     composeTestRule.waitForIdle()
 
     assertEquals(StudioTab.BUILD, vm.currentTab.value)
@@ -321,7 +328,7 @@ class FullAuditUpgradeRobolectricTest {
 
       composeTestRule.setContent {
         BooDaBeatTheme {
-          Box(modifier = Modifier.requiredSize(360.dp, 720.dp)) {
+          Box(modifier = Modifier.fillMaxSize()) {
             LibraryScreen(viewModel = vm)
           }
         }
@@ -335,7 +342,12 @@ class FullAuditUpgradeRobolectricTest {
       composeTestRule.waitForIdle()
 
       val dupTag = "template_duplicate_$firstTemplate"
-      composeTestRule.onNodeWithTag(dupTag).assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+      composeTestRule.waitUntil(timeoutMillis = 3000) {
+        vm.promptTemplates.value.any { it.id == firstTemplate }
+      }
+      composeTestRule.onNodeWithTag("library_list")
+        .performScrollToNode(hasTestTag(dupTag))
+      composeTestRule.onNodeWithTag(dupTag).performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp)
 
       // Verify history-to-template conversion saves a pinned template
       val historyEntry = PromptHistoryEntity(
@@ -365,7 +377,7 @@ class FullAuditUpgradeRobolectricTest {
 
     composeTestRule.setContent {
       BooDaBeatTheme {
-        Box(modifier = Modifier.requiredSize(360.dp, 720.dp)) {
+        Box(modifier = Modifier.fillMaxSize()) {
           AdvisorScreen(viewModel = vm)
         }
       }
@@ -382,6 +394,7 @@ class FullAuditUpgradeRobolectricTest {
 
     composeTestRule.onNodeWithTag("advisor_artist_hygiene_card").assertIsDisplayed()
     composeTestRule.onNodeWithTag("action_strip_artist_names")
+      .performScrollTo()
       .assertIsDisplayed()
       .assertHeightIsAtLeast(48.dp)
       .performClick()
@@ -415,7 +428,7 @@ class FullAuditUpgradeRobolectricTest {
 
       composeTestRule.setContent {
         BooDaBeatTheme {
-          Box(modifier = Modifier.requiredSize(360.dp, 720.dp)) {
+          Box(modifier = Modifier.fillMaxSize()) {
             TakesScreen(viewModel = vm)
           }
         }
@@ -423,16 +436,22 @@ class FullAuditUpgradeRobolectricTest {
       composeTestRule.waitForIdle()
 
       val expandTag = "action_toggle_take_expand_$takeId"
+      composeTestRule.waitUntil(timeoutMillis = 3000) {
+        composeTestRule.onAllNodesWithTag(expandTag).fetchSemanticsNodes().isNotEmpty()
+      }
       composeTestRule.onNodeWithTag("takes_list").performScrollToNode(hasTestTag(expandTag))
       composeTestRule.waitForIdle()
 
       composeTestRule.onNodeWithTag(expandTag)
+        .performScrollTo()
         .assertIsDisplayed()
         .assertHeightIsAtLeast(48.dp)
         .performClick()
       composeTestRule.waitForIdle()
 
+      composeTestRule.onNodeWithTag("takes_list").performScrollToNode(hasText("Hide Full Prompts ▲"))
       composeTestRule.onNodeWithText("Hide Full Prompts ▲").assertIsDisplayed()
+      composeTestRule.onNodeWithTag("takes_list").performScrollToNode(hasText("muddy mix, nasal vocals"))
       composeTestRule.onNodeWithText("muddy mix, nasal vocals").assertIsDisplayed()
     }
   }
@@ -444,7 +463,7 @@ class FullAuditUpgradeRobolectricTest {
 
     composeTestRule.setContent {
       BooDaBeatTheme {
-        Box(modifier = Modifier.requiredSize(360.dp, 720.dp)) {
+        Box(modifier = Modifier.fillMaxSize()) {
           BuildScreen(viewModel = vm)
         }
       }
@@ -453,6 +472,6 @@ class FullAuditUpgradeRobolectricTest {
 
     composeTestRule.onNodeWithTag("build_groove_monitor").assertIsDisplayed()
     composeTestRule.onNodeWithTag("build_monitor_loop").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
-    composeTestRule.onNodeWithText("PARAM EST. · NO AUDIO").assertIsDisplayed()
+    composeTestRule.onAllNodesWithText("PARAM EST. · NO AUDIO").onFirst().assertIsDisplayed()
   }
 }

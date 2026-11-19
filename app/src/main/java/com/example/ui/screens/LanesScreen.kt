@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.repository.PromptBankRepository
 import com.example.ui.components.BrandLogoImage
+import com.example.ui.components.ProductionStudioGrid
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.StudioTab
@@ -45,8 +46,11 @@ import kotlinx.coroutines.delay
 fun LanesScreen(viewModel: MainViewModel) {
   val activeLane by viewModel.activeLane.collectAsStateWithLifecycle()
   val audioAnalysis by viewModel.audioAnalysis.collectAsStateWithLifecycle()
+  val laneLayerStates by viewModel.laneLayerStates.collectAsStateWithLifecycle()
+  val gridContext = androidx.compose.ui.platform.LocalContext.current
 
   val allLanes = viewModel.bankRepo.allLanes
+  var showStudioGrid by rememberSaveable { mutableStateOf(false) }
   var rawSearchInput by rememberSaveable { mutableStateOf("") }
   var debouncedSearchQuery by rememberSaveable { mutableStateOf("") }
   var bankFilter by rememberSaveable { mutableStateOf("All") }
@@ -105,6 +109,11 @@ fun LanesScreen(viewModel: MainViewModel) {
     }
   }
 
+  val filteredLayerStates = remember(laneLayerStates, filteredLanes) {
+    val allowed = filteredLanes.toSet()
+    laneLayerStates.filter { it.laneName in allowed }
+  }
+
   val headerAndFilters: @Composable () -> Unit = {
     Column {
       Text(
@@ -113,10 +122,87 @@ fun LanesScreen(viewModel: MainViewModel) {
         color = AmberGold
       )
       Text(
-        text = "21 Verified-Bank Lanes + 20 Expansion Lanes. Filter by bank, BPM, or genre family, compare side-by-side, or match your beat.",
+        text = "21 Verified-Bank Lanes + 20 Expansion Lanes. Switch between Catalog Reference and 41-Lane Production Studio Grid.",
         style = MaterialTheme.typography.bodyMedium,
         color = TextSecondary
       )
+      Spacer(modifier = Modifier.height(10.dp))
+
+      // Workspace Switcher + Quick Build Toggle
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Surface(
+          color = if (!showStudioGrid) AmberGold else StudioCardElevated,
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .weight(1f)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { showStudioGrid = false }
+            .border(1.dp, if (!showStudioGrid) AmberGold else StudioBorder, RoundedCornerShape(8.dp))
+            .semantics { contentDescription = "View 41 lanes in Catalog mode" }
+            .testTag("lanes_mode_catalog")
+        ) {
+          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)) {
+            Text(
+              text = "Catalog (41)",
+              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+              color = if (!showStudioGrid) Color.Black else TextPrimary,
+              maxLines = 1
+            )
+          }
+        }
+
+        Surface(
+          color = if (showStudioGrid) StudioCyan else StudioCardElevated,
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier
+            .weight(1f)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { showStudioGrid = true }
+            .border(1.dp, if (showStudioGrid) StudioCyan else StudioBorder, RoundedCornerShape(8.dp))
+            .semantics { contentDescription = "Open 41-lane Production Studio Grid layer organizer" }
+            .testTag("lanes_mode_studio_grid")
+        ) {
+          Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)) {
+            Text(
+              text = "Studio Grid",
+              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+              color = if (showStudioGrid) Color.Black else TextPrimary,
+              maxLines = 1
+            )
+          }
+        }
+
+        OutlinedButton(
+          onClick = {
+            if (showStudioGrid) {
+              viewModel.applyProductionGridMixToBuild(context = gridContext, switchToBuild = true)
+            } else {
+              viewModel.setTab(StudioTab.BUILD)
+            }
+          },
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+          modifier = Modifier
+            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .semantics { contentDescription = "Jump to Build workspace with active lane or grid mix" }
+            .testTag("lanes_quick_build_toggle")
+        ) {
+          Icon(Icons.Default.Bolt, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(3.dp))
+          Text(
+            text = "Build",
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = AmberGold,
+            maxLines = 1
+          )
+        }
+      }
       Spacer(modifier = Modifier.height(10.dp))
 
       // Persistent Debounced Search Field
@@ -585,6 +671,25 @@ fun LanesScreen(viewModel: MainViewModel) {
         }
       }
     }
+  }
+
+  if (showStudioGrid) {
+    ProductionStudioGrid(
+      lanes = filteredLayerStates,
+      activeLane = activeLane,
+      onToggleMute = { viewModel.toggleLaneMute(it) },
+      onToggleSolo = { viewModel.toggleLaneSolo(it) },
+      onLevelChanged = { laneName, lvl -> viewModel.setLaneLevel(laneName, lvl) },
+      onLayerTagSelected = { laneName, tag -> viewModel.setLaneLayerTag(laneName, tag) },
+      onSelectLane = { viewModel.setLane(it) },
+      onApplyMixToBuild = { viewModel.applyProductionGridMixToBuild(context = gridContext, switchToBuild = true) },
+      onResetMixers = { viewModel.resetAllLaneMixers() },
+      totalCatalogCount = allLanes.size,
+      headerSlot = headerAndFilters,
+      emptySlot = lanesEmptyStateCard,
+      modifier = Modifier.fillMaxSize()
+    )
+    return
   }
 
   BoxWithConstraints(

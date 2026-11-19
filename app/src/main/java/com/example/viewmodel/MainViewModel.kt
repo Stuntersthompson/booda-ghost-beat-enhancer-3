@@ -210,6 +210,10 @@ class MainViewModel(
   private val _simplePrompt = MutableStateFlow("")
   val simplePrompt: StateFlow<String> = _simplePrompt.asStateFlow()
 
+  // 41-Lane ProductionStudioGrid Audio Layer Organizer State
+  private val _laneLayerStates = MutableStateFlow<List<StudioLaneLayerState>>(emptyList())
+  val laneLayerStates: StateFlow<List<StudioLaneLayerState>> = _laneLayerStates.asStateFlow()
+
   // Audio Analysis & Live Recording
   private val _audioAnalysis = MutableStateFlow<AudioAnalysisResult?>(null)
   val audioAnalysis: StateFlow<AudioAnalysisResult?> = _audioAnalysis.asStateFlow()
@@ -341,6 +345,7 @@ class MainViewModel(
 
   init {
     bankRepo.ensureLoaded()
+    initializeLaneLayerStates()
     if (savedStateHandle.contains(KEY_JOB_TYPE)) {
       restoreFromSavedState()
     } else {
@@ -2442,6 +2447,156 @@ ${_lyricsMap.value}
 
   internal fun reportConnectivityStateForTest(state: GlobalConnectivityState) {
     _connectivityState.value = state
+  }
+
+  private fun initializeLaneLayerStates() {
+    val lanes = bankRepo.allLanes.ifEmpty { bankRepo.expansionLanes.map { it.name } }
+    _laneLayerStates.value = lanes.mapIndexed { index, laneName ->
+      val profile = bankRepo.laneTempoProfile(laneName)
+      val defaultTag = when {
+        laneName.contains("808", ignoreCase = true) ||
+          laneName.contains("slab", ignoreCase = true) ||
+          laneName.contains("amapiano", ignoreCase = true) -> StudioLayerTag.EIGHT_OH_EIGHT
+        laneName.contains("soul", ignoreCase = true) ||
+          laneName.contains("gospel", ignoreCase = true) -> StudioLayerTag.SAMPLE_LOCK
+        laneName.contains("rage", ignoreCase = true) ||
+          laneName.contains("glitch", ignoreCase = true) ||
+          laneName.contains("phonk", ignoreCase = true) -> StudioLayerTag.FX_RISER
+        laneName.contains("plugg", ignoreCase = true) ||
+          laneName.contains("jazz", ignoreCase = true) ||
+          laneName.contains("cloud", ignoreCase = true) -> StudioLayerTag.CHOP_MELODY
+        laneName.contains("detroit", ignoreCase = true) ||
+          laneName.contains("florida", ignoreCase = true) -> StudioLayerTag.TOPS_HATS
+        else -> StudioLayerTag.CANVAS_DRUMS
+      }
+      StudioLaneLayerState(
+        laneIndex = index + 1,
+        laneName = laneName,
+        bpmRange = "${profile.bpmMin}-${profile.bpmMax} BPM",
+        genreFamily = profile.genreFamily,
+        regionTag = profile.regionTag,
+        drumTexture = bankRepo.laneDrums(laneName),
+        isVerified = profile.isVerified,
+        isMuted = false,
+        isSoloed = false,
+        level = if (laneName == _activeLane.value) 0.90f else 0.80f,
+        layerTag = defaultTag
+      )
+    }
+  }
+
+  fun toggleLaneMute(laneName: String) {
+    _laneLayerStates.value = _laneLayerStates.value.map { layer ->
+      if (layer.laneName == laneName) layer.copy(isMuted = !layer.isMuted) else layer
+    }
+  }
+
+  fun toggleLaneSolo(laneName: String) {
+    _laneLayerStates.value = _laneLayerStates.value.map { layer ->
+      if (layer.laneName == laneName) layer.copy(isSoloed = !layer.isSoloed) else layer
+    }
+  }
+
+  fun setLaneLevel(laneName: String, level: Float) {
+    val clamped = level.coerceIn(0f, 1f)
+    _laneLayerStates.value = _laneLayerStates.value.map { layer ->
+      if (layer.laneName == laneName) layer.copy(level = clamped) else layer
+    }
+  }
+
+  fun setLaneLayerTag(laneName: String, tag: StudioLayerTag) {
+    _laneLayerStates.value = _laneLayerStates.value.map { layer ->
+      if (layer.laneName == laneName) layer.copy(layerTag = tag) else layer
+    }
+  }
+
+  fun resetAllLaneMixers() {
+    initializeLaneLayerStates()
+  }
+
+  fun applyProductionGridMixToBuild(
+    context: Context? = null,
+    switchToBuild: Boolean = true
+  ) {
+    val layers = _laneLayerStates.value
+    if (layers.isEmpty()) return
+    val anySoloed = layers.any { it.isSoloed }
+    val audible = layers.filter { it.isAudible(anySoloed) }
+    val lead = audible.maxByOrNull { (if (it.isSoloed) 2f else 0f) + it.level }
+    if (lead != null && lead.laneName != _activeLane.value) {
+      _activeLane.value = lead.laneName
+      savedStateHandle[KEY_LANE] = lead.laneName
+      _lyricsMap.value = bankRepo.buildV6LyricsMap(lead.laneName, _jobType.value).take(LYRICS_LIMIT)
+      savedStateHandle[KEY_LYRICS_MAP] = _lyricsMap.value
+    }
+
+    val synthesizedStyle = SunoWorkstationPromptEngine.synthesizeBuildStyleFromLayers(
+      layers = layers,
+      activeLane = _activeLane.value,
+      jobType = _jobType.value
+    )
+    _stylePrompt.value = synthesizedStyle
+    _appliedTemplateId.value = null
+    savedStateHandle[KEY_STYLE_PROMPT] = synthesizedStyle
+    updateSimplePrompt()
+    resetHandoffSteps()
+    recordGeneratedPrompt(synthesizedStyle, source = "Studio Grid", lane = _activeLane.value)
+    if (switchToBuild) {
+      setTab(StudioTab.BUILD)
+    }
+    if (context != null) {
+      val count = audible.size
+      Toast.makeText(
+        context,
+        "Synced $count active layer(s) from 41-Lane Studio Grid to Build",
+        Toast.LENGTH_SHORT
+      ).show()
+    }
+  }
+
+  fun toggleWorkstationChipForBuild(
+    chip: WorkstationTagChip,
+    context: Context? = null
+  ): String? {
+    val outcome = SunoWorkstationPromptEngine.toggleTagInStylePrompt(
+      currentStyle = _stylePrompt.value,
+      token = chip.token,
+      preserveLockLine = _jobType.value == JobType.PRESERVE,
+      maxChars = STYLE_LIMIT
+    )
+    if (outcome.blockedReason != null) {
+      if (context != null) {
+        Toast.makeText(context, outcome.blockedReason, Toast.LENGTH_SHORT).show()
+      }
+      return outcome.blockedReason
+    }
+    if (outcome.updatedPrompt != _stylePrompt.value) {
+      updateStylePrompt(outcome.updatedPrompt)
+    }
+    return null
+  }
+
+  fun toggleWorkstationChipForSimple(
+    chip: WorkstationTagChip,
+    context: Context? = null
+  ): String? {
+    val outcome = SunoWorkstationPromptEngine.toggleTagInSimplePrompt(
+      currentSimple = _simplePrompt.value,
+      token = chip.token,
+      preserveLockLine = _jobType.value == JobType.PRESERVE,
+      styleHeaderCap = STYLE_LIMIT,
+      totalCap = SIMPLE_WORKING_LIMIT
+    )
+    if (outcome.blockedReason != null) {
+      if (context != null) {
+        Toast.makeText(context, outcome.blockedReason, Toast.LENGTH_SHORT).show()
+      }
+      return outcome.blockedReason
+    }
+    if (outcome.updatedPrompt != _simplePrompt.value) {
+      updateSimplePrompt(outcome.updatedPrompt)
+    }
+    return null
   }
 
   override fun onCleared() {

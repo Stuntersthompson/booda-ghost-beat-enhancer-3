@@ -11,10 +11,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,8 +33,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.JobType
 import com.example.data.model.LOCK_LINE
 import com.example.data.model.SIMPLE_WORKING_LIMIT
+import com.example.data.model.STYLE_LIMIT
+import com.example.data.model.SunoComplianceAuditor
+import com.example.ui.components.SunoPromptWorkstation
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
+import com.example.viewmodel.StudioTab
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -47,8 +49,6 @@ fun SimpleScreen(viewModel: MainViewModel) {
   val simplePrompt by viewModel.simplePrompt.collectAsStateWithLifecycle()
 
   val isPreserve = jobType == JobType.PRESERVE
-  val chars = simplePrompt.length
-  val isOverLimit = chars > SIMPLE_WORKING_LIMIT
   val remixTemplates = remember(activeLane) { viewModel.bankRepo.getRemixTemplates(activeLane) }
 
   val headerBlock: @Composable () -> Unit = {
@@ -153,143 +153,33 @@ fun SimpleScreen(viewModel: MainViewModel) {
   }
 
   val promptEditorCard: @Composable () -> Unit = {
-    Surface(
-      color = StudioCard,
-      shape = RoundedCornerShape(12.dp),
-      modifier = Modifier
-        .fillMaxWidth()
-        .border(
-          1.dp,
-          if (isOverLimit) StudioMiss else StudioBorder,
-          RoundedCornerShape(12.dp)
-        )
-    ) {
-      Column(modifier = Modifier.padding(14.dp)) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          FlowRow(
-            modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-          ) {
-            Text(
-              text = "SIMPLE PROMPT BOX",
-              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-              color = AmberGold,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis
-            )
-            Surface(
-              color = if (isOverLimit) Color(0x33EF4444) else StudioCardElevated,
-              shape = RoundedCornerShape(6.dp)
-            ) {
-              Text(
-                text = "$chars / $SIMPLE_WORKING_LIMIT c",
-                style = MonospaceMetric.copy(fontSize = 11.sp),
-                color = if (isOverLimit) StudioMiss else StudioCyan,
-                maxLines = 1,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-              )
-            }
-          }
-
-          var simpleCopiedFlash by remember { mutableStateOf(false) }
-          LaunchedEffect(simpleCopiedFlash) {
-            if (simpleCopiedFlash) {
-              kotlinx.coroutines.delay(1200L)
-              simpleCopiedFlash = false
-            }
-          }
-          IconButton(
-            onClick = {
-              simpleCopiedFlash = true
-              viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt)
-            },
-            modifier = Modifier
-              .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-              .testTag("action_copy_simple")
-          ) {
-            Icon(
-              imageVector = if (simpleCopiedFlash) Icons.Default.Check else Icons.Default.ContentCopy,
-              contentDescription = "Copy Simple Prompt",
-              tint = if (simpleCopiedFlash) StudioWinner else TextSecondary,
-              modifier = Modifier.size(18.dp)
-            )
-          }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        OutlinedTextField(
-          value = simplePrompt,
-          onValueChange = { viewModel.updateSimplePrompt(it) },
-          modifier = Modifier
-            .fillMaxWidth()
-            .semantics { contentDescription = "Editable Simple Composer single-box Suno prompt" }
-            .testTag("input_simple_prompt"),
-          textStyle = MonospacePrompt.copy(color = TextPrimary),
-          minLines = 10,
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = StudioBg,
-            unfocusedContainerColor = StudioBg,
-            focusedBorderColor = StudioCyan,
-            unfocusedBorderColor = StudioBorder
-          ),
-          shape = RoundedCornerShape(8.dp)
-        )
-        if (isPreserve && !simplePrompt.contains(LOCK_LINE)) {
-          Spacer(modifier = Modifier.height(10.dp))
-          Surface(
-            color = Color(0x22EF4444),
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier
-              .fillMaxWidth()
-              .border(0.5.dp, StudioMiss.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-          ) {
-            FlowRow(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f, fill = false)
-              ) {
-                Icon(Icons.Default.Warning, contentDescription = null, tint = StudioMiss, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                  text = "Preserve mode missing exact sample lock line.",
-                  style = MaterialTheme.typography.labelSmall,
-                  color = StudioMiss
-                )
-              }
-              TextButton(
-                onClick = {
-                  val body = simplePrompt.trimStart()
-                  val prefix = "$LOCK_LINE. "
-                  val next = if (body.isBlank()) prefix.trimEnd() else "$prefix$body"
-                  viewModel.updateSimplePrompt(next.take(SIMPLE_WORKING_LIMIT))
-                },
-                modifier = Modifier
-                  .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                  .testTag("action_simple_insert_lock")
-              ) {
-                Text(
-                  text = "Insert Lock Line",
-                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                  color = AmberGold
-                )
-              }
-            }
-          }
-        }
-      }
-    }
+    SunoPromptWorkstation(
+      title = "Simple Composer · v6 Workstation",
+      promptText = simplePrompt,
+      onPromptChanged = { viewModel.updateSimplePrompt(it) },
+      onToggleChip = { chip -> viewModel.toggleWorkstationChipForSimple(chip, context) },
+      onCopy = { viewModel.copyToClipboard(context, "Simple Prompt", simplePrompt) },
+      maxChars = SIMPLE_WORKING_LIMIT,
+      styleHeaderCap = STYLE_LIMIT,
+      isSimpleBoxMode = true,
+      isPreserve = isPreserve,
+      activeLane = activeLane,
+      minLines = 8,
+      placeholderText = "Style header (<= 1,000c) followed by [Instrumental] and Suno v6 song structure tags...",
+      onInsertLockLine = {
+        val body = simplePrompt.trimStart()
+        val prefix = "$LOCK_LINE. "
+        val next = if (body.isBlank()) prefix.trimEnd() else "$prefix$body"
+        viewModel.updateSimplePrompt(next.take(SIMPLE_WORKING_LIMIT))
+      },
+      onStripArtists = {
+        val cleaned = SunoComplianceAuditor.stripArtistNames(simplePrompt)
+        viewModel.updateSimplePrompt(cleaned)
+      },
+      onOpenLaneGrid = { viewModel.setTab(StudioTab.LANES) },
+      inputTestTag = "input_simple_prompt",
+      copyTestTag = "action_copy_simple"
+    )
   }
 
   val primaryCopyButton: @Composable () -> Unit = {
@@ -382,7 +272,8 @@ fun SimpleScreen(viewModel: MainViewModel) {
       LazyColumn(
         modifier = Modifier
           .fillMaxSize()
-          .padding(horizontal = 14.dp),
+          .padding(horizontal = 14.dp)
+          .testTag("simple_list"),
         contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
       ) {

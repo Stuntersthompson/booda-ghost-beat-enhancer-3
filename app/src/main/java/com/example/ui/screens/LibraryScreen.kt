@@ -561,7 +561,10 @@ fun LibraryScreen(viewModel: MainViewModel) {
       }
     } else {
       LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(horizontal = 14.dp)
+          .testTag("library_list"),
         contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {

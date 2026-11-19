@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -207,7 +208,10 @@ fun QuickTemplatesBar(
           horizontalArrangement = Arrangement.spacedBy(8.dp),
           modifier = Modifier.fillMaxWidth()
         ) {
-          items(visibleTemplates.take(12), key = { it.id }) { template ->
+          itemsIndexed(
+            visibleTemplates.take(12),
+            key = { index, tmpl -> if (tmpl.id != 0L) tmpl.id else "${tmpl.title}_${tmpl.category}_$index" }
+          ) { _, template ->
             val isApplied = appliedTemplateId != null && appliedTemplateId == template.id
             val isPreserve = JobType.fromString(template.jobType) == JobType.PRESERVE
             Surface(

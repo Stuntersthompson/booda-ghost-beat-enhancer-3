@@ -25,6 +25,8 @@ import com.example.ui.theme.BooDaBeatTheme
 import com.example.viewmodel.MainViewModel
 import java.io.File
 import kotlin.math.abs
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -36,7 +38,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], qualifiers = "w360dp-h720dp-xhdpi")
 class BrandLogoRobolectricTest {
 
   @get:Rule
@@ -150,13 +152,21 @@ class BrandLogoRobolectricTest {
   @Test
   fun testTakesEmptyStateDisplaysOfficialLogo() {
     val viewModel = MainViewModel(app)
+    runBlocking {
+      viewModel.takeRepo.allTakes.first().forEach { viewModel.takeRepo.deleteTake(it.id) }
+    }
     composeTestRule.setContent {
       BooDaBeatTheme {
         TakesScreen(viewModel = viewModel)
       }
     }
     composeTestRule.waitForIdle()
+    composeTestRule.waitUntil(timeoutMillis = 3000) {
+      viewModel.takesList.value.isEmpty()
+    }
     // Initial room database starts with 0 takes, so empty takes block renders official logo
+    composeTestRule.onNodeWithTag("takes_list")
+      .performScrollToNode(hasTestTag("takes_empty_logo"))
     composeTestRule.onNodeWithTag("takes_empty_logo").assertIsDisplayed()
   }
 

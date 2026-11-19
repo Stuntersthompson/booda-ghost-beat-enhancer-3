@@ -130,7 +130,9 @@ fun AudioMeterCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = TextMuted,
                 maxLines = 1,
-                softWrap = false
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).padding(end = 4.dp)
               )
               Surface(
                 color = bpmConfColor.copy(alpha = 0.16f),
@@ -156,11 +158,12 @@ fun AudioMeterCard(
               style = MonospaceMetric.copy(fontSize = if (hasMeasuredBpm) 24.sp else 16.sp),
               color = if (hasMeasuredBpm) AmberGold else TextMuted,
               maxLines = 1,
-              softWrap = false
+              softWrap = false,
+              modifier = Modifier.testTag("meter_tempo_value")
             )
             Text(
               text = when {
-                !hasMeasuredBpm -> "UNREAD"
+                !hasMeasuredBpm -> "SIGNAL UNREAD"
                 isTempoEstimate -> "ESTIMATE"
                 else -> "${analysis.bpmConfidence.uppercase()} CONFIDENCE"
               },
@@ -229,7 +232,9 @@ fun AudioMeterCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = TextMuted,
                 maxLines = 1,
-                softWrap = false
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).padding(end = 4.dp)
               )
               Surface(
                 color = keyConfColor.copy(alpha = 0.16f),

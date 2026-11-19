@@ -42,6 +42,7 @@ import com.example.ui.components.QuickTemplatesBar
 import com.example.ui.components.RecentPromptsHistoryCard
 import com.example.ui.components.SaveTemplateDialog
 import com.example.ui.components.SettingsCardView
+import com.example.ui.components.SunoPromptWorkstation
 import com.example.ui.theme.*
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.RandomizeScope
@@ -198,19 +199,24 @@ fun BuildScreen(viewModel: MainViewModel) {
                   modifier = Modifier.size(18.dp)
                 )
               }
-              IconButton(
-                onClick = { viewModel.toggleAudioLoop() },
-                modifier = Modifier
-                  .size(48.dp)
-                  .testTag("build_monitor_loop")
-              ) {
-                Icon(
-                  imageVector = Icons.Default.Repeat,
-                  contentDescription = if (isLoopingAudio) "Disable groove loop" else "Enable groove loop",
-                  tint = if (isLoopingAudio) AmberGold else TextMuted,
-                  modifier = Modifier.size(18.dp)
-                )
-              }
+            }
+            IconButton(
+              onClick = { viewModel.toggleAudioLoop() },
+              enabled = hasPlayableAudio && !isRecording,
+              modifier = Modifier
+                .size(48.dp)
+                .testTag("build_monitor_loop")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Repeat,
+                contentDescription = if (isLoopingAudio) "Disable groove loop" else "Enable groove loop",
+                tint = when {
+                  !(hasPlayableAudio && !isRecording) -> TextMuted.copy(alpha = 0.5f)
+                  isLoopingAudio -> AmberGold
+                  else -> TextMuted
+                },
+                modifier = Modifier.size(18.dp)
+              )
             }
 
             val isMeasuredMonitor = audioAnalysis != null && audioAnalysis.isAudioMeasured
@@ -861,14 +867,23 @@ fun BuildScreen(viewModel: MainViewModel) {
             )
           }
           item {
-            PromptBox(
-              title = "Style of Music",
-              text = stylePrompt,
-              onTextChanged = { viewModel.updateStylePrompt(it) },
-              limit = STYLE_LIMIT,
-              minLines = 3,
+            SunoPromptWorkstation(
+              title = "Style of Music · Workstation",
+              promptText = stylePrompt,
+              onPromptChanged = { viewModel.updateStylePrompt(it) },
+              onToggleChip = { chip -> viewModel.toggleWorkstationChipForBuild(chip, context) },
+              onCopy = { viewModel.copyToClipboard(context, "Style Prompt", stylePrompt) },
+              maxChars = STYLE_LIMIT,
+              styleHeaderCap = STYLE_LIMIT,
+              isSimpleBoxMode = false,
               isPreserve = isPreserve,
-              onCopy = { viewModel.copyToClipboard(context, "Style Prompt", stylePrompt) }
+              activeLane = activeLane,
+              minLines = 3,
+              onInsertLockLine = { viewModel.autoFixComplianceRule(ComplianceRuleId.PRESERVE_LOCK_LINE, context) },
+              onStripArtists = { viewModel.autoFixAllCompliance(context) },
+              onOpenLaneGrid = { viewModel.setTab(StudioTab.LANES) },
+              inputTestTag = "input_style_of_music",
+              copyTestTag = "copy_style_of_music"
             )
           }
           item {
@@ -970,14 +985,23 @@ fun BuildScreen(viewModel: MainViewModel) {
           )
         }
         item {
-          PromptBox(
-            title = "Style of Music",
-            text = stylePrompt,
-            onTextChanged = { viewModel.updateStylePrompt(it) },
-            limit = STYLE_LIMIT,
-            minLines = 3,
+          SunoPromptWorkstation(
+            title = "Style of Music · Workstation",
+            promptText = stylePrompt,
+            onPromptChanged = { viewModel.updateStylePrompt(it) },
+            onToggleChip = { chip -> viewModel.toggleWorkstationChipForBuild(chip, context) },
+            onCopy = { viewModel.copyToClipboard(context, "Style Prompt", stylePrompt) },
+            maxChars = STYLE_LIMIT,
+            styleHeaderCap = STYLE_LIMIT,
+            isSimpleBoxMode = false,
             isPreserve = isPreserve,
-            onCopy = { viewModel.copyToClipboard(context, "Style Prompt", stylePrompt) }
+            activeLane = activeLane,
+            minLines = 3,
+            onInsertLockLine = { viewModel.autoFixComplianceRule(ComplianceRuleId.PRESERVE_LOCK_LINE, context) },
+            onStripArtists = { viewModel.autoFixAllCompliance(context) },
+            onOpenLaneGrid = { viewModel.setTab(StudioTab.LANES) },
+            inputTestTag = "input_style_of_music",
+            copyTestTag = "copy_style_of_music"
           )
         }
         item {
